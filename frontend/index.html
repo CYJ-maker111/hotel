@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>酒店中央空调监控面板</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 0; background: #f5f5f7; }
+        header { background: #1f2933; color: white; padding: 12px 24px; }
+        header h1 { margin: 0; font-size: 20px; }
+        main { display: flex; padding: 16px; gap: 16px; }
+        .panel { background: white; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,.05); padding: 16px; flex: 1; min-height: 300px; }
+        .panel h2 { margin-top: 0; font-size: 16px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; }
+        tr:hover { background: #f9fafb; }
+        button { padding: 4px 10px; margin: 2px; border-radius: 4px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; font-size: 12px; }
+        button.primary { background: #2563eb; color: white; border-color: #2563eb; }
+        button.danger { background: #dc2626; color: white; border-color: #dc2626; }
+        button:disabled { opacity: 0.5; cursor: default; }
+        .controls { margin-top: 8px; }
+        .controls label { display: block; margin-bottom: 4px; font-size: 12px; }
+        input[type="number"], select { width: 100%; padding: 4px 6px; border-radius: 4px; border: 1px solid #d1d5db; font-size: 12px; }
+        .row { display: flex; gap: 8px; }
+        .row > div { flex: 1; }
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 999px; font-size: 11px; }
+        .badge.serving { background: #dcfce7; color: #166534; }
+        .badge.waiting { background: #fef9c3; color: #854d0e; }
+        .badge.off { background: #e5e7eb; color: #374151; }
+        .summary { font-size: 13px; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>酒店自助计费中央空调系统</h1>
+</header>
+<main>
+    <div class="panel" style="flex: 1.2">
+        <h2>房间列表</h2>
+        <table id="rooms-table">
+            <thead>
+            <tr>
+                <th>房间</th>
+                <th>状态</th>
+                <th>当前温度</th>
+                <th>模式</th>
+                <th>风速</th>
+                <th>费用(元)</th>
+                <th>操作</th>
+            </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    <div class="panel">
+        <h2>房间控制</h2>
+        <div id="room-control">
+            <p>请先在左侧点击选择一个房间。</p>
+        </div>
+        <hr>
+        <h2>总体统计</h2>
+        <div id="summary" class="summary">
+            加载中…
+        </div>
+        <button id="tick-btn" class="primary" style="margin-top:8px;">模拟前进 60 秒</button>
+    </div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
+
+
