@@ -1,4 +1,5 @@
 let selectedRoomId = null;
+let currentView = "admin";
 
 async function fetchJSON(url, options) {
     const res = await fetch(url, options);
@@ -11,9 +12,12 @@ function stateBadge(state) {
     return '<span class="badge off">关机</span>';
 }
 
+// ---------- 管理员界面：房间列表 & 实时监控 ----------
+
 async function loadRooms() {
     const rooms = await fetchJSON("/api/rooms");
     const tbody = document.querySelector("#rooms-table tbody");
+    if (!tbody) return;
     tbody.innerHTML = "";
     rooms.forEach(r => {
         const tr = document.createElement("tr");
@@ -39,6 +43,7 @@ async function loadRooms() {
 async function loadSummary() {
     const s = await fetchJSON("/api/report/summary");
     const div = document.getElementById("summary");
+    if (!div) return;
     div.innerHTML = `
         总耗电：<b>${s.total_energy.toFixed(4)}</b> 度<br>
         总费用：<b>${s.total_cost.toFixed(2)}</b> 元
@@ -47,6 +52,7 @@ async function loadSummary() {
 
 async function renderRoomControl() {
     const container = document.getElementById("room-control");
+    if (!container) return;
     if (!selectedRoomId) {
         container.innerHTML = "<p>请先在左侧点击选择一个房间。</p>";
         return;
@@ -136,21 +142,146 @@ async function renderRoomControl() {
     };
 }
 
+// ---------- 前台退房结账界面 ----------
+
+async function loadFrontdeskRooms() {
+    const select = document.getElementById("fd-room-select");
+    if (!select) return;
+    const rooms = await fetchJSON("/api/rooms");
+    select.innerHTML = "";
+    rooms.forEach(r => {
+        const opt = document.createElement("option");
+        opt.value = r.room_id;
+        opt.textContent = `房间 ${r.room_id}`;
+        select.appendChild(opt);
+    });
+}
+
+async function loadFrontdeskBill() {
+    const select = document.getElementById("fd-room-select");
+    const container = document.getElementById("fd-bill");
+    if (!select || !container) return;
+    const roomId = parseInt(select.value, 10);
+    if (!roomId) {
+        container.innerHTML = "<p class='muted'>请选择有效的房间号。</p>";
+        return;
+    }
+    const bill = await fetchJSON(`/api/rooms/${roomId}/bill`);
+    let html = `<p><b>房间：</b>${bill.room_id}</p>`;
+    html += `<p><b>总耗电：</b>${bill.total_energy} 度，<b>总费用：</b>${bill.total_cost} 元</p>`;
+    html += "<table><tr><th>ID</th><th>开始时间</th><th>结束时间</th><th>模式</th><th>目标温度</th><th>风速</th><th>费率</th><th>耗电</th><th>费用</th><th>类型</th></tr>";
+    bill.details.forEach(d => {
+        html += `<tr>
+            <td>${d.id}</td>
+            <td>${d.start_time}</td>
+            <td>${d.end_time || ""}</td>
+            <td>${d.mode}</td>
+            <td>${d.target_temp}</td>
+            <td>${d.fan_speed}</td>
+            <td>${d.fee_rate}</td>
+            <td>${d.energy_used}</td>
+            <td>${d.cost}</td>
+            <td>${d.operation_type}</td>
+        </tr>`;
+    });
+    html += "</table>";
+    container.innerHTML = html;
+}
+
+function initFrontdeskView() {
+    const refreshBtn = document.getElementById("fd-refresh-rooms");
+    const loadBillBtn = document.getElementById("fd-load-bill");
+    const printBtn = document.getElementById("fd-print");
+    if (refreshBtn) {
+        refreshBtn.onclick = () => loadFrontdeskRooms();
+    }
+    if (loadBillBtn) {
+        loadBillBtn.onclick = () => loadFrontdeskBill();
+    }
+    if (printBtn) {
+        printBtn.onclick = () => window.print();
+    }
+}
+
+// ---------- 经理报表界面 ----------
+
+async function loadManagerReport() {
+    const startInput = document.getElementById("mgr-start");
+    const endInput = document.getElementById("mgr-end");
+    const container = document.getElementById("mgr-result");
+    if (!container) return;
+
+    let start = startInput && startInput.value ? startInput.value.replace("T", " ") + ":00" : "";
+    let end = endInput && endInput.value ? endInput.value.replace("T", " ") + ":00" : "";
+
+    const params = new URLSearchParams();
+    if (start) params.append("start", start);
+    if (end) params.append("end", end);
+
+    const url = "/api/report/summary_range" + (params.toString() ? `?${params.toString()}` : "");
+    const data = await fetchJSON(url);
+
+    const displayStart = data.start || "最早记录";
+    const displayEnd = data.end || "最新记录";
+
+    container.innerHTML = `
+        <p><b>统计时间范围：</b>${displayStart} ~ ${displayEnd}</p>
+        <p><b>总耗电：</b>${data.total_energy.toFixed(4)} 度</p>
+        <p><b>总费用：</b>${data.total_cost.toFixed(2)} 元</p>
+    `;
+}
+
+function initManagerView() {
+    const btn = document.getElementById("mgr-query");
+    if (btn) {
+        btn.onclick = () => loadManagerReport();
+    }
+}
+
+// ---------- 顶部视图切换 ----------
+
+function switchView(view) {
+    currentView = view;
+    const views = ["admin", "frontdesk", "manager"];
+    views.forEach(v => {
+        const sec = document.getElementById(`view-${v}`);
+        const btn = document.getElementById(`nav-${v}`);
+        if (sec) sec.style.display = v === view ? "" : "none";
+        if (btn) btn.classList.toggle("active", v === view);
+    });
+}
+
 async function init() {
+    // 导航切换
+    const navAdmin = document.getElementById("nav-admin");
+    const navFrontdesk = document.getElementById("nav-frontdesk");
+    const navManager = document.getElementById("nav-manager");
+    if (navAdmin) navAdmin.onclick = () => switchView("admin");
+    if (navFrontdesk) navFrontdesk.onclick = () => switchView("frontdesk");
+    if (navManager) navManager.onclick = () => switchView("manager");
+
+    // 管理员界面初始化
     await loadRooms();
     await loadSummary();
-    document.getElementById("tick-btn").onclick = async () => {
-        await fetchJSON("/api/tick", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({seconds: 60})
-        });
-        await loadRooms();
-        await loadSummary();
-        await renderRoomControl();
-    };
+    const tickBtn = document.getElementById("tick-btn");
+    if (tickBtn) {
+        tickBtn.onclick = async () => {
+            await fetchJSON("/api/tick", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({seconds: 60})
+            });
+            await loadRooms();
+            await loadSummary();
+            await renderRoomControl();
+        };
+    }
+
+    // 前台、经理界面初始化
+    initFrontdeskView();
+    initManagerView();
+    await loadFrontdeskRooms();
 }
 
 window.addEventListener("load", init);
-
 

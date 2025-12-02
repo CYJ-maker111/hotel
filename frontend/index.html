@@ -2,12 +2,16 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>酒店中央空调监控面板</title>
+    <title>酒店中央空调系统</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 0; background: #f5f5f7; }
         header { background: #1f2933; color: white; padding: 12px 24px; }
         header h1 { margin: 0; font-size: 20px; }
-        main { display: flex; padding: 16px; gap: 16px; }
+        nav { background: #111827; padding: 0 24px; display: flex; gap: 8px; }
+        nav button { border: none; background: transparent; color: #9ca3af; padding: 10px 14px; cursor: pointer; font-size: 13px; }
+        nav button.active { color: #f9fafb; border-bottom: 2px solid #3b82f6; }
+        main { padding: 16px; }
+        .layout-row { display: flex; gap: 16px; }
         .panel { background: white; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,.05); padding: 16px; flex: 1; min-height: 300px; }
         .panel h2 { margin-top: 0; font-size: 16px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -19,7 +23,7 @@
         button:disabled { opacity: 0.5; cursor: default; }
         .controls { margin-top: 8px; }
         .controls label { display: block; margin-bottom: 4px; font-size: 12px; }
-        input[type="number"], select { width: 100%; padding: 4px 6px; border-radius: 4px; border: 1px solid #d1d5db; font-size: 12px; }
+        input[type="number"], select, input[type="datetime-local"] { width: 100%; padding: 4px 6px; border-radius: 4px; border: 1px solid #d1d5db; font-size: 12px; box-sizing: border-box; }
         .row { display: flex; gap: 8px; }
         .row > div { flex: 1; }
         .badge { display: inline-block; padding: 2px 6px; border-radius: 999px; font-size: 11px; }
@@ -27,42 +31,103 @@
         .badge.waiting { background: #fef9c3; color: #854d0e; }
         .badge.off { background: #e5e7eb; color: #374151; }
         .summary { font-size: 13px; }
+        .view-title { margin-bottom: 12px; font-size: 18px; font-weight: 600; color: #111827; }
+        .muted { color: #6b7280; font-size: 12px; }
     </style>
 </head>
 <body>
 <header>
     <h1>酒店自助计费中央空调系统</h1>
 </header>
+<nav>
+    <button id="nav-admin" class="active">空调管理员界面</button>
+    <button id="nav-frontdesk">酒店前台结账界面</button>
+    <button id="nav-manager">酒店经理报表界面</button>
+</nav>
 <main>
-    <div class="panel" style="flex: 1.2">
-        <h2>房间列表</h2>
-        <table id="rooms-table">
-            <thead>
-            <tr>
-                <th>房间</th>
-                <th>状态</th>
-                <th>当前温度</th>
-                <th>模式</th>
-                <th>风速</th>
-                <th>费用(元)</th>
-                <th>操作</th>
-            </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
-    </div>
-    <div class="panel">
-        <h2>房间控制</h2>
-        <div id="room-control">
-            <p>请先在左侧点击选择一个房间。</p>
+    <!-- 管理员监控界面 -->
+    <section id="view-admin">
+        <div class="view-title">空调管理员界面 <span class="muted">实时监控各房间空调运行状态</span></div>
+        <div class="layout-row">
+            <div class="panel" style="flex: 1.2">
+                <h2>房间列表</h2>
+                <table id="rooms-table">
+                    <thead>
+                    <tr>
+                        <th>房间</th>
+                        <th>状态</th>
+                        <th>当前温度</th>
+                        <th>模式</th>
+                        <th>风速</th>
+                        <th>费用(元)</th>
+                        <th>操作</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h2>房间控制</h2>
+                <div id="room-control">
+                    <p>请先在左侧点击选择一个房间。</p>
+                </div>
+                <hr>
+                <h2>总体统计</h2>
+                <div id="summary" class="summary">
+                    加载中…
+                </div>
+                <button id="tick-btn" class="primary" style="margin-top:8px;">模拟前进 60 秒</button>
+            </div>
         </div>
-        <hr>
-        <h2>总体统计</h2>
-        <div id="summary" class="summary">
-            加载中…
+    </section>
+
+    <!-- 酒店前台退房结账界面 -->
+    <section id="view-frontdesk" style="display:none;">
+        <div class="view-title">酒店前台结账界面 <span class="muted">退房时出具空调使用账单及详单</span></div>
+        <div class="panel">
+            <h2>房间账单查询</h2>
+            <div class="row controls">
+                <div>
+                    <label for="fd-room-select">选择房间</label>
+                    <select id="fd-room-select"></select>
+                </div>
+                <div style="align-self:flex-end;">
+                    <button id="fd-refresh-rooms" class="primary">刷新房间列表</button>
+                </div>
+            </div>
+            <div style="margin-top:8px;">
+                <button id="fd-load-bill" class="primary">查询账单</button>
+                <button id="fd-print" style="margin-left:4px;">打印账单</button>
+            </div>
+            <div id="fd-bill" style="margin-top:12px; font-size:13px;">
+                <p class="muted">请选择房间并点击“查询账单”。</p>
+            </div>
         </div>
-        <button id="tick-btn" class="primary" style="margin-top:8px;">模拟前进 60 秒</button>
-    </div>
+    </section>
+
+    <!-- 酒店经理报表界面 -->
+    <section id="view-manager" style="display:none;">
+        <div class="view-title">酒店经理报表界面 <span class="muted">按时间范围查看汇总能耗与费用</span></div>
+        <div class="panel">
+            <h2>时间范围统计</h2>
+            <div class="row controls">
+                <div>
+                    <label for="mgr-start">开始时间</label>
+                    <input type="datetime-local" id="mgr-start">
+                </div>
+                <div>
+                    <label for="mgr-end">结束时间</label>
+                    <input type="datetime-local" id="mgr-end">
+                </div>
+            </div>
+            <div style="margin-top:8px;">
+                <button id="mgr-query" class="primary">查询统计报表</button>
+            </div>
+            <div id="mgr-result" style="margin-top:12px; font-size:13px;">
+                <p class="muted">请选择时间范围并点击“查询统计报表”。不填写时间则统计全部数据。</p>
+            </div>
+        </div>
+    </section>
 </main>
 <script src="app.js"></script>
 </body>

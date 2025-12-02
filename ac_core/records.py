@@ -178,4 +178,37 @@ class DetailRecord:
         finally:
             conn.close()
 
+    def get_summary_range(
+        self, start_time: Optional[str] = None, end_time: Optional[str] = None
+    ) -> Dict[str, float]:
+        """
+        按时间范围统计总能耗与总费用。
+
+        说明：
+        - start_time / end_time 均为字符串，格式建议为 "YYYY-MM-DD HH:MM:SS"
+        - 若只提供 start_time，则统计 start_time 之后的所有记录
+        - 若只提供 end_time，则统计 end_time 之前的所有记录
+        - 若两者都为空，则等同于 get_summary
+        """
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            sql = "SELECT SUM(energy_used), SUM(cost) FROM detail_records WHERE 1=1"
+            params: list = []
+
+            if start_time:
+                sql += " AND start_time >= ?"
+                params.append(start_time)
+            if end_time:
+                sql += " AND start_time <= ?"
+                params.append(end_time)
+
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            energy = row[0] or 0.0
+            cost = row[1] or 0.0
+            return {"total_energy": float(energy), "total_cost": float(cost)}
+        finally:
+            conn.close()
+
 
