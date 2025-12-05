@@ -29,7 +29,6 @@ class DetailRecord:
                     target_temp REAL NOT NULL,
                     fan_speed TEXT NOT NULL,
                     fee_rate REAL NOT NULL,
-                    energy_used REAL NOT NULL DEFAULT 0,
                     cost REAL NOT NULL DEFAULT 0,
                     operation_type TEXT NOT NULL
                 )
@@ -70,10 +69,10 @@ class DetailRecord:
             conn.close()
 
     def update_on_service(
-        self, record_id: int, energy_used: float, cost: float, end_time: Optional[str] = None
+        self, record_id: int, cost: float, end_time: Optional[str] = None
     ) -> None:
         """
-        更新记录的能耗与费用，可选结束时间。
+        更新记录的费用，可选结束时间。
         """
         conn = self._get_conn()
         try:
@@ -82,19 +81,19 @@ class DetailRecord:
                 cur.execute(
                     """
                     UPDATE detail_records
-                    SET energy_used = ?, cost = ?, end_time = ?
+                    SET cost = ?, end_time = ?
                     WHERE id = ?
                     """,
-                    (energy_used, cost, end_time, record_id),
+                    (cost, end_time, record_id),
                 )
             else:
                 cur.execute(
                     """
                     UPDATE detail_records
-                    SET energy_used = ?, cost = ?
+                    SET cost = ?
                     WHERE id = ?
                     """,
-                    (energy_used, cost, record_id),
+                    (cost, record_id),
                 )
             conn.commit()
         finally:
@@ -116,18 +115,48 @@ class DetailRecord:
         finally:
             conn.close()
 
+    def get_record(self, record_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, room_id, start_time, end_time, mode, target_temp, fan_speed,
+                       fee_rate, cost, operation_type
+                FROM detail_records
+                WHERE id = ?
+                """,
+                (record_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                return {
+                    "id": row[0],
+                    "room_id": row[1],
+                    "start_time": row[2],
+                    "end_time": row[3],
+                    "mode": row[4],
+                    "target_temp": row[5],
+                    "fan_speed": row[6],
+                    "fee_rate": row[7],
+                    "cost": row[8],
+                    "operation_type": row[9],
+                }
+            return None
+        finally:
+            conn.close()
+
     def get_room_total(self, room_id: int) -> Dict[str, float]:
         conn = self._get_conn()
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT SUM(energy_used), SUM(cost) FROM detail_records WHERE room_id = ?",
+                "SELECT SUM(cost) FROM detail_records WHERE room_id = ?",
                 (room_id,),
             )
             row = cur.fetchone()
-            energy = row[0] or 0.0
-            cost = row[1] or 0.0
-            return {"total_energy": float(energy), "total_cost": float(cost)}
+            cost = row[0] or 0.0
+            return {"total_cost": round(float(cost), 2)}
         finally:
             conn.close()
 
@@ -138,7 +167,7 @@ class DetailRecord:
             cur.execute(
                 """
                 SELECT id, start_time, end_time, mode, target_temp, fan_speed,
-                       fee_rate, energy_used, cost, operation_type
+                       fee_rate, cost, operation_type
                 FROM detail_records
                 WHERE room_id = ?
                 ORDER BY id ASC
@@ -157,9 +186,8 @@ class DetailRecord:
                         "target_temp": r[4],
                         "fan_speed": r[5],
                         "fee_rate": r[6],
-                        "energy_used": r[7],
-                        "cost": r[8],
-                        "operation_type": r[9],
+                        "cost": r[7],
+                        "operation_type": r[8],
                     }
                 )
             return result
@@ -170,11 +198,10 @@ class DetailRecord:
         conn = self._get_conn()
         try:
             cur = conn.cursor()
-            cur.execute("SELECT SUM(energy_used), SUM(cost) FROM detail_records")
+            cur.execute("SELECT SUM(cost) FROM detail_records")
             row = cur.fetchone()
-            energy = row[0] or 0.0
-            cost = row[1] or 0.0
-            return {"total_energy": float(energy), "total_cost": float(cost)}
+            cost = row[0] or 0.0
+            return {"total_cost": float(cost)}
         finally:
             conn.close()
 
@@ -182,7 +209,7 @@ class DetailRecord:
         self, start_time: Optional[str] = None, end_time: Optional[str] = None
     ) -> Dict[str, float]:
         """
-        按时间范围统计总能耗与总费用。
+        按时间范围统计总费用。
 
         说明：
         - start_time / end_time 均为字符串，格式建议为 "YYYY-MM-DD HH:MM:SS"
@@ -193,7 +220,7 @@ class DetailRecord:
         conn = self._get_conn()
         try:
             cur = conn.cursor()
-            sql = "SELECT SUM(energy_used), SUM(cost) FROM detail_records WHERE 1=1"
+            sql = "SELECT SUM(cost) FROM detail_records WHERE 1=1"
             params: list = []
 
             if start_time:
@@ -205,9 +232,20 @@ class DetailRecord:
 
             cur.execute(sql, params)
             row = cur.fetchone()
-            energy = row[0] or 0.0
-            cost = row[1] or 0.0
-            return {"total_energy": float(energy), "total_cost": float(cost)}
+            cost = row[0] or 0.0
+            return {"total_cost": float(cost)}
+        finally:
+            conn.close()
+    
+    def clear_all_records(self) -> None:
+        """
+        清除详单表中的所有记录。
+        """
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM detail_records")
+            conn.commit()
         finally:
             conn.close()
 

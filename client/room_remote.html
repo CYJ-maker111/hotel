@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>空调控制面板</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .ac-panel {
+            background-color: white;
+            border-radius: 20px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+            padding: 30px;
+            width: 320px;
+            text-align: center;
+        }
+
+        .room-info {
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .temperature-display {
+            font-size: 64px;
+            font-weight: bold;
+            color: #333;
+            margin: 20px 0;
+        }
+
+        .target-temp {
+            font-size: 24px;
+            color: #666;
+            margin: 10px 0;
+        }
+
+        .controls {
+            margin: 20px 0;
+        }
+
+        .temp-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+        }
+
+        .temp-button {
+            width: 50px;
+            height: 50px;
+            font-size: 24px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            margin: 0 10px;
+        }
+
+        .temp-button:hover {
+            background-color: #0056b3;
+        }
+
+        .mode-controls {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .mode-button {
+            padding: 10px 20px;
+            margin: 0 5px;
+            border: 1px solid #ddd;
+            background-color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .mode-button.active {
+            background-color: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+
+        .speed-controls {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .speed-button {
+            padding: 10px 15px;
+            margin: 0 5px;
+            border: 1px solid #ddd;
+            background-color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .speed-button.active {
+            background-color: #28a745;
+            color: white;
+            border-color: #28a745;
+        }
+
+        .power-button {
+            padding: 15px 40px;
+            font-size: 18px;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            margin: 20px 0;
+        }
+
+        .power-button.on {
+            background-color: #28a745;
+        }
+
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .status.serving {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .status.waiting {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .status.off {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .room-selector {
+            margin-bottom: 20px;
+        }
+
+        .room-selector select {
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div class="ac-panel">
+        <div class="room-selector">
+            <label for="room-id">选择房间：</label>
+            <select id="room-id">
+                <option value="1">房间 1</option>
+                <option value="2">房间 2</option>
+                <option value="3">房间 3</option>
+                <option value="4">房间 4</option>
+                <option value="5">房间 5</option>
+            </select>
+        </div>
+
+        <div class="room-info">
+            <div id="room-status" class="status off">关机</div>
+        </div>
+
+        <div class="temperature-display" id="current-temp">--</div>
+        <div class="target-temp">目标温度: <span id="target-temp">--</span>°C</div>
+        <div>模式: <span id="mode">--</span></div>
+        <div>风速: <span id="fan-speed">--</span></div>
+
+        <div class="controls">
+            <div class="temp-controls">
+                <button class="temp-button" id="decrease-temp">-</button>
+                <span style="font-size: 24px;">温度</span>
+                <button class="temp-button" id="increase-temp">+</button>
+            </div>
+
+            <div class="mode-controls">
+                <button class="mode-button" data-mode="cool">制冷</button>
+                <button class="mode-button" data-mode="heat">制热</button>
+            </div>
+
+            <div class="speed-controls">
+                <button class="speed-button" data-speed="1">低</button>
+                <button class="speed-button" data-speed="2">中</button>
+                <button class="speed-button" data-speed="3">高</button>
+            </div>
+
+            <button class="power-button" id="power-button">开机</button>
+
+        </div>
+    </div>
+
+    <script>
+        // API 基础URL
+        const API_BASE_URL = 'http://127.0.0.1:5000/api';
+        
+        // 当前选中的房间ID
+        let currentRoomId = 1;
+        
+        // 当前房间状态
+        let currentRoomStatus = {
+            current_temp: 25,
+            target_temp: 25,
+            mode: 'COOL',
+            fan_speed: 'MEDIUM',
+            state: 'off',
+            energy_used: 0,
+            cost: 0,
+            served_seconds: 0,
+            waiting_seconds: 0
+        };
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('页面加载完成，开始初始化...');
+            console.log('初始currentRoomStatus:', currentRoomStatus);
+            initializeControls();
+            loadRoomStatus();
+            // 每秒更新一次房间状态
+            setInterval(loadRoomStatus, 1000);
+            console.log('初始化完成，可以开始使用空调控制面板');
+        });
+        
+        // 初始化控件事件
+        function initializeControls() {
+            // 房间选择器事件
+            document.getElementById('room-id').addEventListener('change', (e) => {
+                currentRoomId = parseInt(e.target.value);
+                loadRoomStatus();
+            });
+            
+            // 温度调整事件
+            document.getElementById('increase-temp').addEventListener('click', () => {
+                adjustTemperature(1);
+            });
+            
+            document.getElementById('decrease-temp').addEventListener('click', () => {
+                adjustTemperature(-1);
+            });
+            
+            // 模式切换事件
+            document.querySelectorAll('.mode-button').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const mode = e.target.dataset.mode;
+                    switchMode(mode);
+                });
+            });
+            
+            // 风速调整事件
+            document.querySelectorAll('.speed-button').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const speed = parseInt(e.target.dataset.speed);
+                    adjustWindSpeed(speed);
+                });
+            });
+            
+            // 开关机事件
+            document.getElementById('power-button').addEventListener('click', togglePower);
+            
+            // 测试按钮事件
+    
+        }
+        
+        // 获取房间状态
+        async function loadRoomStatus() {
+            console.log('开始加载房间状态...');
+            try {
+                // 由于后端没有直接获取单个房间状态的API，我们获取所有房间状态然后筛选
+                const response = await fetch(`${API_BASE_URL}/rooms`);
+                if (!response.ok) {
+                    console.error('加载房间状态失败，HTTP状态码:', response.status);
+                    const errorText = await response.text();
+                    console.error('错误信息:', errorText);
+                    return;
+                }
+                const allRooms = await response.json();
+                console.log('所有房间状态:', allRooms);
+                console.log('currentRoomId:', currentRoomId, '类型:', typeof currentRoomId);
+                
+                // 检查每个房间的room_id类型和值
+                allRooms.forEach((room, index) => {
+                    console.log(`房间${index+1}: room_id=${room.room_id}, 类型=${typeof room.room_id}`);
+                });
+                
+                // 使用严格相等比较，确保类型和值都匹配
+                currentRoomStatus = allRooms.find(room => room.room_id === currentRoomId);
+                
+                // 如果没有找到，尝试转换类型后再比较
+                if (!currentRoomStatus) {
+                    console.log('没有找到匹配的房间，尝试转换类型后再比较...');
+                    currentRoomStatus = allRooms.find(room => parseInt(room.room_id) === currentRoomId || room.room_id === currentRoomId.toString());
+                }
+                
+                console.log('当前房间状态:', currentRoomStatus);
+                
+                if (currentRoomStatus) {
+                    updateUI();
+                } else {
+                    console.error('无法找到当前房间的状态信息');
+                }
+            } catch (error) {
+                console.error('加载房间状态失败:', error);
+            }
+        }
+        
+        // 更新UI显示
+        function updateUI() {
+            console.log('开始更新UI...');
+            if (!currentRoomStatus) {
+                console.error('currentRoomStatus为null，无法更新UI');
+                return;
+            }
+            
+            console.log('当前房间状态:', currentRoomStatus);
+            
+            // 更新温度显示
+            document.getElementById('current-temp').textContent = `${currentRoomStatus.current_temp}°C`;
+            document.getElementById('target-temp').textContent = currentRoomStatus.target_temp;
+            
+            // 更新模式和风速
+            document.getElementById('mode').textContent = currentRoomStatus.mode === 'cool' ? '制冷' : '制热';
+            document.getElementById('fan-speed').textContent = getSpeedText(currentRoomStatus.fan_speed);
+            
+            // 更新状态
+            const statusElement = document.getElementById('room-status');
+            statusElement.className = `status ${currentRoomStatus.state}`;
+            statusElement.textContent = getStatusText(currentRoomStatus.state);
+            
+            // 更新开关机按钮
+            const powerButton = document.getElementById('power-button');
+            if (currentRoomStatus.state === 'off') {
+                powerButton.textContent = '开机';
+                powerButton.className = 'power-button';
+            } else {
+                powerButton.textContent = '关机';
+                powerButton.className = 'power-button on';
+            }
+            
+            // 更新模式按钮状态
+            document.querySelectorAll('.mode-button').forEach(button => {
+                button.classList.remove('active');
+                if (button.dataset.mode === currentRoomStatus.mode) {
+                    button.classList.add('active');
+                }
+            });
+            
+            // 更新风速按钮状态
+            document.querySelectorAll('.speed-button').forEach(button => {
+                button.classList.remove('active');
+                if (parseInt(button.dataset.speed) === getSpeedValue(currentRoomStatus.fan_speed)) {
+                    button.classList.add('active');
+                }
+            });
+            
+            console.log('UI更新完成');
+        }
+        
+        // 转换风速文本
+        function getSpeedText(speed) {
+            const speedMap = {
+                'LOW': '低',
+                'MEDIUM': '中',
+                'HIGH': '高'
+            };
+            return speedMap[speed] || speed;
+        }
+        
+        // 转换风速值
+        function getSpeedValue(speed) {
+            const speedMap = {
+                'LOW': 1,
+                'MEDIUM': 2,
+                'HIGH': 3
+            };
+            return speedMap[speed] || 1;
+        }
+        
+        // 转换状态文本
+        function getStatusText(state) {
+            const stateMap = {
+                'off': '关机',
+                'serving': '运行中',
+                'waiting': '等待中'
+            };
+            return stateMap[state] || state;
+        }
+        
+        // 开关机
+        async function togglePower() {
+            console.log('开始切换电源状态...');
+            console.log('currentRoomStatus:', currentRoomStatus);
+            console.log('currentRoomId:', currentRoomId, '类型:', typeof currentRoomId);
+            
+            try {
+                // 检查currentRoomStatus是否有效
+                if (!currentRoomStatus) {
+                    console.error('currentRoomStatus无效:', currentRoomStatus);
+                    alert('房间状态未加载，请稍后再试');
+                    return;
+                }
+                
+                // 检查currentRoomStatus.state是否有效
+                if (typeof currentRoomStatus.state === 'undefined') {
+                    console.error('currentRoomStatus.state无效:', currentRoomStatus.state);
+                    alert('房间状态未加载，请稍后再试');
+                    return;
+                }
+                
+                console.log('currentRoomStatus.state:', currentRoomStatus.state);
+                
+                if (currentRoomStatus.state === 'off') {
+                    // 开机
+                    console.log('尝试开机...');
+                    console.log('currentRoomId:', currentRoomId);
+                    console.log('current_temp:', currentRoomStatus.current_temp || 25);
+                    console.log('mode:', currentRoomStatus.mode || 'COOL');
+                    
+                    const url = `${API_BASE_URL}/rooms/${currentRoomId}/power_on`;
+                    console.log('发送开机请求到:', url);
+                    
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            current_temp: currentRoomStatus.current_temp || 25,
+                            mode: currentRoomStatus.mode || 'COOL'
+                        })
+                    });
+                    
+                    console.log('开机请求响应状态:', response.status);
+                    
+                    if (!response.ok) {
+                        console.error('开机失败，HTTP状态码:', response.status);
+                        const errorText = await response.text();
+                        console.error('错误信息:', errorText);
+                        alert('开机失败: ' + errorText);
+                        return;
+                    }
+                    
+                    const result = await response.json();
+                    console.log('开机成功，结果:', result);
+                } else {
+                    // 关机
+                    console.log('尝试关机...');
+                    
+                    const url = `${API_BASE_URL}/rooms/${currentRoomId}/power_off`;
+                    console.log('发送关机请求到:', url);
+                    
+                    const response = await fetch(url, {
+                        method: 'POST'
+                    });
+                    
+                    console.log('关机请求响应状态:', response.status);
+                    
+                    if (!response.ok) {
+                        console.error('关机失败，HTTP状态码:', response.status);
+                        const errorText = await response.text();
+                        console.error('错误信息:', errorText);
+                        alert('关机失败: ' + errorText);
+                        return;
+                    }
+                    
+                    const result = await response.json();
+                    console.log('关机成功，结果:', result);
+                }
+                // 重新加载房间状态
+                console.log('重新加载房间状态...');
+                loadRoomStatus();
+            } catch (error) {
+                console.error('切换电源状态失败:', error);
+                console.error('错误堆栈:', error.stack);
+                alert('切换电源状态失败: ' + error.message);
+            }
+        }
+        
+        // 调整温度
+        async function adjustTemperature(delta) {
+            console.log('开始调整温度...');
+            console.log('currentRoomStatus:', currentRoomStatus);
+            
+            if (!currentRoomStatus) {
+                console.error('currentRoomStatus为null或undefined');
+                alert('房间状态未加载，请稍后再试');
+                return;
+            }
+            
+            if (currentRoomStatus.state === 'off') {
+                console.log('空调当前处于关机状态，无法调整温度');
+                alert('请先开启空调');
+                return;
+            }
+            
+            const newTemp = currentRoomStatus.target_temp + delta;
+            
+            // 根据当前模式设置温度范围限制
+            let minTemp, maxTemp;
+            if (currentRoomStatus.mode === 'cool') {
+                // 制冷模式：18℃-28℃
+                minTemp = 18;
+                maxTemp = 28;
+            } else if (currentRoomStatus.mode === 'heat') {
+                // 制热模式：18℃-25℃
+                minTemp = 18;
+                maxTemp = 25;
+            } else {
+                // 默认不限制
+                minTemp = -Infinity;
+                maxTemp = Infinity;
+            }
+            
+            if (newTemp < minTemp || newTemp > maxTemp) {
+                console.log('温度超出范围:', newTemp);
+                let modeText = currentRoomStatus.mode === 'cool' ? '制冷' : '制热';
+                alert(`温度范围限制在${minTemp}-${maxTemp}℃之间（${modeText}模式）`);
+                return;
+            }
+            
+            console.log('尝试调整温度:', { currentRoomId, currentTemp: currentRoomStatus.target_temp, delta, newTemp });
+            
+            try {
+                const url = `${API_BASE_URL}/rooms/${currentRoomId}/adjust_temperature`;
+                console.log('发送请求到:', url);
+                console.log('请求体:', JSON.stringify({ target_temp: newTemp }));
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        target_temp: newTemp
+                    })
+                });
+                
+                console.log('响应状态:', response.status);
+                
+                if (!response.ok) {
+                    console.error('调整温度失败，HTTP状态码:', response.status);
+                    const errorText = await response.text();
+                    console.error('错误信息:', errorText);
+                    alert('调整温度失败: ' + errorText);
+                    return;
+                }
+                
+                const result = await response.json();
+                console.log('调整温度成功，结果:', result);
+                
+                // 重新加载房间状态
+                loadRoomStatus();
+            } catch (error) {
+                console.error('Failed to adjust temperature:', error);
+                alert('调整温度失败: ' + error.message);
+            }
+        }
+        
+        // 切换模式
+        async function switchMode(mode) {
+            if (currentRoomStatus.state === 'off') return;
+            
+            try {
+                // 注意：当前后端API不支持直接切换模式
+                // 这里我们可以通过关闭再重新开的方式切换模式
+                // 先关机
+                await fetch(`${API_BASE_URL}/rooms/${currentRoomId}/power_off`, {
+                    method: 'POST'
+                });
+                // 再开机，设置新的模式
+                await fetch(`${API_BASE_URL}/rooms/${currentRoomId}/power_on`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        current_temp: currentRoomStatus.current_temp || 25,
+                        mode: mode.toUpperCase()
+                    })
+                });
+                // 重新加载房间状态
+                loadRoomStatus();
+            } catch (error) {
+                console.error('Failed to switch mode:', error);
+            }
+        }
+        
+        // 调整风速
+        async function adjustWindSpeed(speed) {
+            const speedMap = {
+                1: 'LOW',
+                2: 'MEDIUM',
+                3: 'HIGH'
+            };
+            
+            console.log('尝试调整风速:', { currentRoomId, speed, speedValue: speedMap[speed] });
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/rooms/${currentRoomId}/adjust_speed`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        speed: speedMap[speed]
+                    })
+                });
+                
+                if (!response.ok) {
+                    console.error('调整风速失败，HTTP状态码:', response.status);
+                    const errorText = await response.text();
+                    console.error('错误信息:', errorText);
+                    return;
+                }
+                
+                const result = await response.json();
+                console.log('调整风速成功，结果:', result);
+                
+                // 重新加载房间状态
+                loadRoomStatus();
+            } catch (error) {
+                console.error('Failed to adjust wind speed:', error);
+            }
+        }
+        
+
+    </script>
+</body>
+</html>

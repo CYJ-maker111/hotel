@@ -43,6 +43,7 @@
     <button id="nav-admin" class="active">空调管理员界面</button>
     <button id="nav-frontdesk">酒店前台结账界面</button>
     <button id="nav-manager">酒店经理报表界面</button>
+    <a href="db_manager.html" style="border: none; background: transparent; color: #9ca3af; padding: 10px 14px; cursor: pointer; font-size: 13px; text-decoration: none; display: inline-block;" target="_blank">数据库管理</a>
 </nav>
 <main>
     <!-- 管理员监控界面 -->
@@ -67,13 +68,28 @@
                 </table>
             </div>
             <div class="panel">
-                <h2>房间控制</h2>
-                <div id="room-control">
-                    <p>请先在左侧点击选择一个房间。</p>
+                <h2>房间详单查询</h2>
+                <div class="row controls">
+                    <div>
+                        <label for="admin-room-select">选择房间</label>
+                        <select id="admin-room-select"></select>
+                    </div>
+                    <div style="align-self:flex-end;">
+                        <button id="admin-view-detail" class="primary">查看详单</button>
+                    </div>
                 </div>
                 <hr>
-                <h2>总体统计</h2>
-                <div id="summary" class="summary">
+                <div id="admin-detail" style="max-height: 300px; overflow-y: auto;">
+                    <p class="muted">请选择房间并点击"查看详单"按钮。</p>
+                </div>
+                <hr>
+                <h2>服务队列</h2>
+                <div id="served-queue" class="summary">
+                    加载中…
+                </div>
+                <hr>
+                <h2>等待队列</h2>
+                <div id="waiting-queue" class="summary">
                     加载中…
                 </div>
                 <button id="tick-btn" class="primary" style="margin-top:8px;">模拟前进 60 秒</button>
@@ -81,26 +97,87 @@
         </div>
     </section>
 
-    <!-- 酒店前台退房结账界面 -->
+    <!-- 酒店前台界面 -->
     <section id="view-frontdesk" style="display:none;">
-        <div class="view-title">酒店前台结账界面 <span class="muted">退房时出具空调使用账单及详单</span></div>
-        <div class="panel">
-            <h2>房间账单查询</h2>
+        <div class="view-title">酒店前台界面 <span class="muted">登记入住与结账服务</span></div>
+        
+        <!-- 标签切换 -->
+        <div style="margin-bottom:16px;">
+            <button id="checkin-tab" class="active">登记入住</button>
+            <button id="checkout-tab">结账</button>
+        </div>
+        
+        <!-- 登记入住部分 -->
+        <div id="checkin-section" class="panel">
+            <h2>房间登记入住</h2>
             <div class="row controls">
                 <div>
-                    <label for="fd-room-select">选择房间</label>
-                    <select id="fd-room-select"></select>
+                    <label for="ci-room-select">选择房间</label>
+                    <select id="ci-room-select"></select>
                 </div>
-                <div style="align-self:flex-end;">
-                    <button id="fd-refresh-rooms" class="primary">刷新房间列表</button>
+                <div>
+                    <label for="ci-guest-name">客人姓名</label>
+                    <input type="text" id="ci-guest-name" placeholder="请输入客人姓名">
+                </div>
+            </div>
+            <div class="row controls" style="margin-top:8px;">
+                <div>
+                    <label for="ci-checkin-time">入住时间</label>
+                    <input type="datetime-local" id="ci-checkin-time">
+                </div>
+                <div>
+                    <label for="ci-checkout-time">预计退房时间</label>
+                    <input type="datetime-local" id="ci-checkout-time">
                 </div>
             </div>
             <div style="margin-top:8px;">
-                <button id="fd-load-bill" class="primary">查询账单</button>
-                <button id="fd-print" style="margin-left:4px;">打印账单</button>
+                <button id="ci-checkin-btn" class="primary">登记入住</button>
+                <button id="ci-refresh-rooms" style="margin-left:4px;">刷新房间列表</button>
             </div>
-            <div id="fd-bill" style="margin-top:12px; font-size:13px;">
+            <div id="ci-message" style="margin-top:12px; font-size:13px;">
+                <p class="muted">请填写入住信息并点击“登记入住”按钮。</p>
+            </div>
+        </div>
+        
+        <!-- 结账部分 -->
+        <div id="checkout-section" class="panel" style="display:none;">
+            <h2>房间结账</h2>
+            <div class="row controls">
+                <div>
+                    <label for="co-room-select">选择房间</label>
+                    <select id="co-room-select"></select>
+                </div>
+                <div style="align-self:flex-end;">
+                    <button id="co-refresh-rooms" class="primary">刷新房间列表</button>
+                </div>
+            </div>
+            <div style="margin-top:8px;">
+                <button id="co-load-bill" class="primary">查询账单</button>
+                <button id="co-view-detail" style="margin-left:4px;">查看详单</button>
+                <button id="co-checkout" style="margin-left:4px;">结账退房</button>
+                <button id="co-print" style="margin-left:4px;">打印账单</button>
+            </div>
+            <div id="co-bill" style="margin-top:12px; font-size:13px;">
                 <p class="muted">请选择房间并点击“查询账单”。</p>
+            </div>
+            <div id="co-detail" style="margin-top:12px; font-size:13px; display:none;">
+                <h3>空调使用详单</h3>
+                <div id="detail-table-container" style="max-height: 300px; overflow-y: auto;">
+                    <table id="detail-table" style="width:100%; border-collapse: collapse; font-size:12px;">
+                        <thead>
+                            <tr>
+                                <th>开始时间</th>
+                                <th>结束时间</th>
+                                <th>模式</th>
+                                <th>温度</th>
+                                <th>风速</th>
+                                <th>费用(元)</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </section>

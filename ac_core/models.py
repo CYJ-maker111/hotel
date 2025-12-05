@@ -23,6 +23,7 @@ class PowerState(enum.Enum):
     OFF = "off"          # 关机
     WAITING = "waiting"  # 等待队列中
     SERVING = "serving"  # 正在送风
+    PAUSED = "paused"    # 暂停服务（回温状态）
 
 
 DEFAULT_TEMP = 25.0
@@ -39,7 +40,6 @@ class Room:
     state: PowerState = PowerState.OFF
 
     # 计费相关（累计）
-    energy_used: float = 0.0
     cost: float = 0.0
 
     # 统计相关
@@ -53,9 +53,24 @@ class RoomRepository:
     """
 
     def __init__(self, room_count: int):
-        self.rooms: Dict[int, Room] = {
-            i: Room(room_id=i) for i in range(1, room_count + 1)
+        # 为每个房间设置不同的初始气温
+        room_temperatures = {
+            1: 32.0,
+            2: 28.0,
+            3: 30.0,
+            4: 29.0,
+            5: 35.0
         }
+        
+        self.rooms: Dict[int, Room] = {}
+        for i in range(1, room_count + 1):
+            # 使用房间特定的初始温度，如果没有配置则使用默认值
+            initial_temp = room_temperatures.get(i, DEFAULT_TEMP)
+            self.rooms[i] = Room(
+                room_id=i,
+                initial_temp=initial_temp,
+                current_temp=initial_temp  # 初始时当前温度等于初始温度
+            )
 
     def get(self, room_id: int) -> Room:
         return self.rooms[room_id]

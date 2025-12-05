@@ -2,7 +2,7 @@
 
 ### 一、项目简介
 
-本项目实现了一个**快捷廉价酒店自助计费式中央温控系统**的核心逻辑，用于课程/实验作业或原型演示。  
+本项目实现了一个**快捷廉价酒店自助计费式中央温控系统**的完整解决方案，用于课程/实验作业或原型演示。  
 系统支持：
 
 - **房客端功能**：
@@ -23,7 +23,7 @@
 - **优先级调度 + 时间片调度**；
 - **温度按钮防抖逻辑**。
 
-> 说明：本项目主要是后端逻辑模拟，没有 GUI，只需在命令行运行并查看输出即可。
+> 说明：本项目提供了完整的 Web 前后端界面，用户可以通过浏览器直观地操作和监控系统。
 
 ---
 
@@ -35,49 +35,49 @@
 - 制热模式（`Mode.HEAT`）：温度范围 **25–30°C**；
 - 系统默认温度：`25°C`（常量 `DEFAULT_TEMP`）。
 
-在代码中，目标温度通过 `CentralACSystem._clamp_target_temp()` 进行范围限制：
-
-- 制冷：\[18, 25\]；
-- 制热：\[25, 30\]。
+在代码中，目标温度范围限制逻辑集成在温度调节的相关API和界面中。
 
 #### 2. 计费与耗电标准
 
-- **计费标准**：`1 元 / 度`（`CentralACSystem.price_per_energy = 1.0`）。
+- **计费标准**：统一计费费率为 `1 元 / 度`。
 - **耗电标准**（代码中以“度 / 分钟”为单位）：
   - 高风：`1 度 / 分钟`；
   - 中风：`0.5 度 / 分钟`（即 1 度 / 2 分钟）；
   - 低风：`1/3 度 / 分钟`（即 1 度 / 3 分钟）。
 
-能耗与费用模型在 `CentralACSystem._update_room_serving()` 中实现：
+能耗与费用模型在 `Server.update_temperature()` 中实现：
 
-- 每秒能耗 = 每分钟能耗 / 60；
+- 每秒能耗 = 温度变化量（℃）；
 - 房间对象 `Room` 中记录：
   - `energy_used`：总耗电“度”；
   - `cost`：总费用（`energy_used * 价格`）。
 
 #### 3. 温度变化模式
 
-在 `CentralACSystem._update_room_serving()` 和 `_update_room_temp_off()` 中实现：
+在 `Server.update_temperature()` 中实现：
 
-- **送风状态**：
+- **送风状态（SERVING）**：
+  - 高风：`1°C / 分钟`；
   - 中风：`0.5°C / 分钟`；
-  - 高风：`0.5 * 1.2 = 0.6°C / 分钟`；
-  - 低风：`0.5 * 0.8 = 0.4°C / 分钟`；
+  - 低风：`1/3°C / 分钟`；
   - 制冷：在当前温度 > 目标温度时降温，不能降过头；
   - 制热：在当前温度 < 目标温度时升温，不能升过头。
-- **关机/未送风状态**：
-  - 按 `0.5°C / 分钟` 的速度向房间 `initial_temp` 回归（在 `_update_room_temp_off()` 中实现）。
+- **暂停状态（PAUSED）**：
+  - 按 `0.5°C / 分钟` 的速度向目标温度方向回温；
+  - 当回温达到 1°C 时，自动重新进入送风状态。
+- **关机状态（OFF）**：
+  - 按 `0.5°C / 分钟` 的速度向房间 `initial_temp`（初始温度）回归。
 
 #### 4. 自动停止与重启
 
-在 `CentralACSystem._auto_stop_and_restart()` 中实现：
+自动停止与重启逻辑集成在 `Server.update_temperature()` 中：
 
-- **停止送风**：
-  - 制冷：当 `current_temp <= target_temp` 时，自动 `power_off(room_id)`；
-  - 制热：当 `current_temp >= target_temp` 时，自动 `power_off(room_id)`。
-- **自动重启**：
-  - 制冷模式：当 `current_temp >= target_temp + 1°C` 时自动重新发起送风请求；
-  - 制热模式：当 `current_temp <= target_temp - 1°C` 时自动重新发起送风请求；
+- **自动停止送风**：
+  - 制冷：当 `current_temp <= target_temp` 时，自动进入暂停状态（`PAUSED`）；
+  - 制热：当 `current_temp >= target_temp` 时，自动进入暂停状态（`PAUSED`）。
+- **自动重启送风**：
+  - 制冷模式：当房间处于暂停状态且 `current_temp >= target_temp + 1°C` 时，自动重新进入送风状态（`SERVING`）；
+  - 制热模式：当房间处于暂停状态且 `current_temp <= target_temp - 1°C` 时，自动重新进入送风状态（`SERVING`）；
   - 重启时沿用当前房间的 `mode` 与 `fan_speed`。
 
 #### 5. 调度：优先级 + 时间片
@@ -106,10 +106,10 @@
 
 #### 6. 风速/温度调整与请求生成规则
 
-- **风速调整**：在 `CentralACSystem.adjust_fan_speed()` 中实现：
+- **风速调整**：在 `Server.update_speed()` 中实现：
   - 调节风速视为**新的送风请求**；
-  - 将旧请求（若有）移除，提交新的 `ACRequest` 给调度器。
-- **温度调整**：在 `CentralACSystem.adjust_temperature()` 中实现：
+  - 将旧请求（若有）移除，提交新的请求给调度器。
+- **温度调整**：在 `Server.update_target_temperature()` 中实现：
   - 只改变目标温度，不产生新的送风请求；
   - 仅更新房间对象中的 `target_temp`。
 
@@ -129,92 +129,70 @@
 
 #### 1. 文件结构
 
-- 领域层（按你给的类名拆分）：
-  - `ac_core/models.py`：`Mode`、`FanSpeed`、`PowerState`、`Room` 以及 `RoomRepository`（房间仓储）。
-  - `ac_core/queues.py`：`ServedQueue`（服务队列）、`WaitingQueue`（等待队列）、`ServiceState`。
-  - `ac_core/timers.py`：`ServiceTimer`（服务计时器）、`WaitTimer`（等待计时器）。
-  - `ac_core/server.py`：`Server`（服务对象，负责温控参数设置与温度变化）。
-  - `ac_core/records.py`：`DetailRecord`（详单对象，负责操作记录与费用计算，并持久化 SQLite）。
-  - `ac_core/scheduler.py`：`Scheduler`（调度对象）与 `HotelACSystem`（系统封装，对外入口）。
-  - `ac_core/__init__.py`：对外统一导出上述核心类。
-- 原有纯模拟版（保留）：
-  - `central_ac.py`：早期的单文件模拟实现，仍可单独运行 `python central_ac.py` 进行命令行演示。
-- 后端与前端：
-  - `backend_app.py`：Flask Web 后端，提供 REST 接口和静态页面服务。
-  - `frontend/index.html`：简单 Web 控制台页面。
-  - `frontend/app.js`：前端逻辑，调用后端接口完成开机、关机、调风速、查看账单与报表等操作。
+项目采用模块化设计，主要分为以下几个部分：
+
+- **核心模块（ac_core）**：
+  - `ac_core/models.py`：定义系统的核心数据模型，包括 `Mode`、`FanSpeed`、`PowerState`、`Room` 等。
+  - `ac_core/queues.py`：实现服务队列和等待队列的管理。
+  - `ac_core/timers.py`：提供定时器和按钮防抖功能。
+  - `ac_core/server.py`：实现温控系统的核心逻辑，包括温度调节、状态管理等。
+  - `ac_core/records.py`：处理空调使用详单的记录和持久化。
+  - `ac_core/scheduler.py`：实现优先级调度和时间片调度算法。
+  - `ac_core/__init__.py`：对外统一导出核心类。
+
+- **后端服务（backend）**：
+  - `backend_app.py`：Flask Web 后端的入口文件，提供 REST API 接口。
+  - `routes/`：包含所有 API 路由的实现，如房间管理、账单生成、报表统计等。
+
+- **前端界面（frontend）**：
+  - `frontend/index.html`：管理员监控界面，用于实时查看和控制所有房间。
+  - `frontend/app.js`：前端交互逻辑，处理用户操作和数据展示。
+  - `frontend/db_manager.html`：数据库管理界面。
+  - `client/room_remote.html`：房客端遥控器界面。
+
+- **数据库**：
+  - `hotel_ac.db`：SQLite 数据库，用于存储空调使用记录和账单信息。
+
+- **测试文件**：
+  - 多个测试脚本，用于验证系统各功能模块的正确性。
 
 #### 2. 重要接口说明
 
-- **系统初始化**
+- **Web 界面使用**（推荐）
+
+  直接通过浏览器访问系统提供的 Web 界面，即可完成所有操作，包括：
+  - 房间的开机、关机、模式切换
+  - 温度和风速调节
+  - 查看房间状态和费用
+  - 生成账单和报表
+
+- **后端 API 接口**
+
+  系统提供了 RESTful API 接口，主要包括：
+  - `/api/rooms/<room_id>/power_on`：房间开机
+  - `/api/rooms/<room_id>/power_off`：房间关机
+  - `/api/rooms/<room_id>/adjust_temperature`：调节温度
+  - `/api/rooms/<room_id>/adjust_fan_speed`：调节风速
+  - `/api/rooms/<room_id>/status`：获取房间状态
+  - `/api/bills/<room_id>/detail`：获取房间使用详单
+  - `/api/reports/summary`：获取汇总报表
+
+- **核心类接口**（用于二次开发）
 
   ```python
-  from central_ac import CentralACSystem, Mode, FanSpeed
+  from ac_core.server import Server
+  from ac_core.models import Mode, FanSpeed
+  from ac_core.scheduler import Scheduler
 
-  # x 间房，y 间同时服务，时间片 s 秒
-  system = CentralACSystem(room_count=x, service_capacity=y, time_slice_seconds=s)
-  ```
-
-- **房间开机/设定**
-
-  ```python
-  system.power_on(
-      room_id=1,
-      mode=Mode.COOL,          # 或 Mode.HEAT
-      target_temp=22.0,
-      fan_speed=FanSpeed.HIGH  # HIGH / MEDIUM / LOW
-  )
-  ```
-
-- **关机**
-
-  ```python
-  system.power_off(room_id=1)
-  ```
-
-- **只调温（不产生新请求）**
-
-  ```python
-  system.adjust_temperature(room_id=1, new_target_temp=23.0)
-  ```
-
-- **调速（产生新送风请求）**
-
-  ```python
-  system.adjust_fan_speed(room_id=1, new_fan_speed=FanSpeed.MEDIUM)
-  ```
-
-- **时间推进（模拟运行）**
-
-  ```python
-  # 模拟 1 小时（3600 秒）
-  system.tick(3600)
-  ```
-
-- **查询状态（管理员监控用）**
-
-  ```python
-  # 单个房间
-  status = system.get_room_status(1)
-
-  # 所有房间
-  all_status = system.get_all_rooms_status()
-  ```
-
-- **账单与报表**
-
-  ```python
-  # 某房间退房账单
-  bill = system.get_bill_for_room(1)
-
-  # 总体统计报表
-  report = system.get_summary_report()
+  # 初始化服务器和调度器
+  server = Server()
+  scheduler = Scheduler(capacity=2)  # 同时服务2个房间
   ```
 
 - **按钮防抖示例**
 
   ```python
-  from central_ac import CommandDebouncer
+  from ac_core.timers import CommandDebouncer
 
   # (时间戳, 目标温度)
   raw_cmds = [
@@ -231,7 +209,7 @@
 
 #### 1. 运行 Web 版前后端
 
-1. 安装依赖（只用到 Flask，可选）：
+1. 安装依赖：
 
    ```bash
    pip install flask
@@ -245,19 +223,23 @@
 
 3. 浏览器访问 `http://127.0.0.1:5000/`，即可看到“酒店自助计费中央空调系统”界面：
 
-   - 左侧为房间列表（温度、模式、风速、状态、费用等）；
-   - 右侧为选中房间的“开机 / 关机 / 调风速 / 查看详单”控制区以及总体统计报表；
+   - 左侧为房间列表，显示每个房间的当前状态（温度、模式、风速、状态等）；
+   - 右侧为房间操作区，可以对选中房间进行开机、关机、调温、调风速等操作；
+   - 管理员可以查看房间的详细使用记录和费用统计；
    - 点击“模拟前进 60 秒”按钮，可推进系统时间，观察温度与费用变化。
 
-4. 所有开机、调风速等操作都会写入 SQLite 数据库 `hotel_ac.db` 的 `detail_records` 表，可用于退房结算和统计分析。
+4. 房客端界面：
 
-#### 2. 运行命令行模拟版（可选）
+   访问 `http://127.0.0.1:5000/client/room_remote.html`，即可使用房客端遥控器界面。
 
-保留原有 `central_ac.py` 的命令行 demo：
+#### 2. 数据存储
 
-```bash
-python central_ac.py
-```
+所有操作记录都会被保存到 SQLite 数据库 `hotel_ac.db` 中，主要包括：
+- 房间的开关机记录
+- 温度和风速调节记录
+- 使用时间和费用信息
+
+这些数据可用于生成退房账单和统计报表。
 
 
 ---
@@ -266,11 +248,13 @@ python central_ac.py
 
 若作为课程设计或进一步项目，可在本基础上扩展：
 
-- **增加持久化**：将账单、详单和报表写入数据库或文件；
-- **增加前端界面**：使用 Web / 桌面 UI 显示房客面板、管理员监控界面；
 - **完善时间范围报表**：按任意时间区间统计不同房间或楼层的能耗；
 - **更精细的物理模型**：考虑室外温度、热负荷等因素；
-- **异常处理与日志**：记录设备故障、非法操作等。
+- **异常处理与日志**：记录设备故障、非法操作等；
+- **用户认证与授权**：为不同角色（房客、前台、管理员）提供不同的权限控制；
+- **实时通知**：当温度异常或系统故障时发送通知；
+- **移动端适配**：优化前端界面，使其在移动设备上也能良好显示；
+- **数据可视化**：使用图表展示能耗趋势和费用统计。
 
 本项目当前版本侧重于**正确实现题目给出的业务规则与调度算法**，结构清晰，便于进一步扩展和二次开发。
 

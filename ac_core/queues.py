@@ -38,11 +38,16 @@ class WaitingQueue:
     等待队列：按顺序维护等待服务的房间 ID 列表
     """
 
-    def __init__(self):
+    def __init__(self, capacity: int = -1):
+        """
+        初始化等待队列
+        capacity: 队列容量，-1表示无界
+        """
         self._rooms: List[int] = []
+        self.capacity = capacity
 
     def push(self, room_id: int) -> None:
-        if room_id not in self._rooms:
+        if room_id not in self._rooms and (self.capacity == -1 or len(self._rooms) < self.capacity):
             self._rooms.append(room_id)
 
     def pop(self, room_id: int) -> None:
@@ -63,4 +68,11 @@ class WaitingQueue:
     def all_rooms(self) -> List[int]:
         return list(self._rooms)
 
-
+    def get_position(self, room_id: int) -> int:
+        """
+        获取房间在等待队列中的位置（1-based索引）
+        如果房间不在队列中，返回-1
+        """
+        if room_id in self._rooms:
+            return self._rooms.index(room_id) + 1
+        return -1

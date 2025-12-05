@@ -1,88 +1,39 @@
-from flask import Flask, jsonify, request
+from flask import Flask, send_from_directory
+import os
 
-from ac_core import HotelACSystem, FanSpeed
-
-
+# 初始化Flask应用
 app = Flask(__name__, static_folder="frontend", static_url_path="/")
 
-# 简单全局单例系统：5 间房，最多同时服务 2 间房，时间片 30 秒
-system = HotelACSystem(room_count=5, capacity=2, time_slice_seconds=30)
+# 添加client文件夹作为静态资源目录
+@app.route('/client/<path:filename>')
+def serve_client(filename):
+    return send_from_directory('client', filename)
+
+# 从app_context导入系统实例
+from app_context import system
 
 
 @app.route("/")
 def index():
+    """主页路由"""
     return app.send_static_file("index.html")
 
+# 导入并注册蓝图
+from routes.rooms import rooms_bp
+from routes.checkin import checkin_bp
+from routes.reports import reports_bp
+from routes.queues import queues_bp
+from routes.time import time_bp
+from routes.bills import bills_bp
+from routes.db_manager import db_manager_bp
 
-@app.route("/api/rooms", methods=["GET"])
-def get_rooms():
-    status = system.scheduler.get_all_rooms_status()
-    return jsonify(status)
-
-
-@app.route("/api/rooms/<int:room_id>/power_on", methods=["POST"])
-def power_on(room_id: int):
-    data = request.get_json(silent=True) or {}
-    current_temp = float(data.get("current_temp", 25.0))
-    result = system.scheduler.power_on(room_id, current_temp)
-    return jsonify(result)
-
-
-@app.route("/api/rooms/<int:room_id>/power_off", methods=["POST"])
-def power_off(room_id: int):
-    system.scheduler.power_off(room_id)
-    return jsonify({"room_id": room_id, "state": "off"})
-
-
-@app.route("/api/rooms/<int:room_id>/adjust_speed", methods=["POST"])
-def adjust_speed(room_id: int):
-    data = request.get_json(silent=True) or {}
-    speed_str = str(data.get("speed", "MEDIUM")).upper()
-    speed = FanSpeed[speed_str]
-    result = system.scheduler.adjust_wind_speed(room_id, speed)
-    return jsonify(result)
-
-
-@app.route("/api/rooms/<int:room_id>/bill", methods=["GET"])
-def get_bill(room_id: int):
-    bill = system.scheduler.get_bill_for_room(room_id)
-    return jsonify(bill)
-
-
-@app.route("/api/report/summary", methods=["GET"])
-def summary():
-    report = system.scheduler.get_summary_report()
-    return jsonify(report)
-
-
-@app.route("/api/report/summary_range", methods=["GET"])
-def summary_range():
-    """
-    支持按时间范围查询的统计报表接口。
-    请求参数（query string）：
-    - start: 起始时间字符串（可选），格式建议为 YYYY-MM-DD HH:MM:SS
-    - end:   结束时间字符串（可选），格式建议为 YYYY-MM-DD HH:MM:SS
-    """
-    start = request.args.get("start") or None
-    end = request.args.get("end") or None
-
-    summary = system.scheduler.detail_record.get_summary_range(start_time=start, end_time=end)
-    return jsonify(
-        {
-            "start": start,
-            "end": end,
-            "total_energy": round(summary["total_energy"], 4),
-            "total_cost": round(summary["total_cost"], 2),
-        }
-    )
-
-
-@app.route("/api/tick", methods=["POST"])
-def tick():
-    data = request.get_json(silent=True) or {}
-    seconds = int(data.get("seconds", 60))
-    system.tick(seconds)
-    return jsonify({"ticked": seconds})
+app.register_blueprint(rooms_bp)
+app.register_blueprint(checkin_bp)
+app.register_blueprint(reports_bp)
+app.register_blueprint(queues_bp)
+app.register_blueprint(time_bp)
+app.register_blueprint(bills_bp)
+app.register_blueprint(db_manager_bp)
 
 
 if __name__ == "__main__":

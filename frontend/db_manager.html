@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据库管理</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        .tab-btn {
+            padding: 10px 20px;
+            background-color: #f0f0f0;
+            border: none;
+            cursor: pointer;
+            margin-right: 5px;
+            border-radius: 5px 5px 0 0;
+        }
+        .tab-btn.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            position: sticky;
+            top: 0;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .action-btn {
+            padding: 5px 10px;
+            margin: 2px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .delete-btn {
+            background-color: #f44336;
+            color: white;
+        }
+        .edit-btn {
+            background-color: #2196F3;
+            color: white;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 50%;
+            max-width: 600px;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover {
+            color: black;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        .save-btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .filter-section {
+            margin-bottom: 20px;
+        }
+        .filter-input {
+            padding: 8px;
+            margin-right: 10px;
+        }
+        .filter-btn {
+            padding: 8px 15px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .clear-btn {
+            padding: 8px 15px;
+            background-color: #f0f0f0;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .table-container {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .no-data {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>数据库管理系统</h1>
+    <div class="container">
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="detail-records">空调使用记录</button>
+            <button class="tab-btn" data-tab="checkin-records">入住记录</button>
+            <button class="tab-btn" data-tab="room-initialization">房间初始化</button>
+        </div>
+
+        <!-- 空调使用记录 -->
+        <div id="detail-records" class="tab-content active">
+            <h2>空调使用记录管理</h2>
+            <div class="filter-section">
+                <button class="clear-btn" id="dr-clear-table-btn">清除表内容</button>
+            </div>
+            <div class="table-container">
+                <table id="detail-records-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>房间ID</th>
+                            <th>开始时间</th>
+                            <th>结束时间</th>
+                            <th>模式</th>
+                            <th>目标温度</th>
+                            <th>风速</th>
+                            <th>费率</th>
+                            <th>费用</th>
+                            <th>操作类型</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detail-records-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 入住记录 -->
+        <div id="checkin-records" class="tab-content">
+            <h2>入住记录管理</h2>
+            <div class="filter-section">
+                <button class="clear-btn" id="cr-clear-table-btn">清除表内容</button>
+            </div>
+            <div class="table-container">
+                <table id="checkin-records-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>房间ID</th>
+                            <th>客人姓名</th>
+                            <th>入住时间</th>
+                            <th>退房时间</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="checkin-records-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 房间初始化 -->
+        <div id="room-initialization" class="tab-content">
+            <h2>房间初始化管理</h2>
+            <div class="filter-section">
+                <button class="save-btn" onclick="openInitModal()">初始化房间温度</button>
+            </div>
+            <div class="table-container">
+                <table id="rooms-status-table">
+                    <thead>
+                        <tr>
+                            <th>房间ID</th>
+                            <th>当前温度</th>
+                            <th>目标温度</th>
+                            <th>状态</th>
+                            <th>模式</th>
+                            <th>风速</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rooms-status-body">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑模态框 -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h3>编辑记录</h3>
+            <form id="edit-form">
+                <input type="hidden" id="record-id">
+                <input type="hidden" id="table-name">
+                <div id="form-fields">
+                    <!-- 动态生成的表单字段 -->
+                </div>
+                <button type="button" class="save-btn" onclick="saveRecord()">保存</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 房间初始化模态框 -->
+    <div id="init-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeInitModal()">&times;</span>
+            <h3>初始化房间温度</h3>
+            <form id="init-form">
+                <div class="form-group">
+                    <label for="init-room-id">房间ID</label>
+                    <input type="number" id="init-room-id" min="1" required>
+                </div>
+                <div class="form-group">
+                    <label for="init-temperature">初始温度</label>
+                    <input type="number" id="init-temperature" step="0.1" required>
+                </div>
+                <button type="button" class="save-btn" onclick="initRoomTemperature()">确认初始化</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentTable = 'detail-records';
+
+
+        
+        // 绑定清除表内容按钮事件
+        function bindFilterEvents() {
+            // 空调使用记录
+            document.getElementById('dr-clear-table-btn').addEventListener('click', clearDetailTable);
+            
+            // 入住记录
+            document.getElementById('cr-clear-table-btn').addEventListener('click', clearCheckinTable);
+        }
+
+        // 加载房间状态
+        function loadRoomStatus() {
+            fetch('/api/rooms/status')
+                .then(response => response.json())
+                .then(data => {
+                    const tbody = document.getElementById('rooms-status-body');
+                    tbody.innerHTML = '';
+
+                    if (data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6" class="no-data">没有找到房间记录</td></tr>';
+                        return;
+                    }
+
+                    data.forEach(room => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${room.room_id}</td>
+                            <td>${room.current_temp}</td>
+                            <td>${room.target_temp}</td>
+                            <td>${room.state}</td>
+                            <td>${room.mode}</td>
+                            <td>${room.fan_speed}</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                })
+                .catch(error => {
+                    console.error('加载房间状态失败:', error);
+                });
+        }
+
+        // 打开初始化模态框
+        function openInitModal() {
+            document.getElementById('init-modal').style.display = 'block';
+        }
+
+        // 关闭初始化模态框
+        function closeInitModal() {
+            document.getElementById('init-modal').style.display = 'none';
+            document.getElementById('init-form').reset();
+        }
+
+        // 初始化房间温度
+        function initRoomTemperature() {
+            const roomId = document.getElementById('init-room-id').value;
+            const temperature = document.getElementById('init-temperature').value;
+
+            fetch('/api/rooms/initialize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    room_id: parseInt(roomId),
+                    initial_temp: parseFloat(temperature) 
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('初始化成功:', data);
+                alert('房间温度初始化成功');
+                closeInitModal();
+                loadRoomStatus(); // 重新加载房间状态
+            })
+            .catch(error => {
+                console.error('初始化失败:', error);
+                alert('房间温度初始化失败');
+            });
+        }
+
+        // 初始化标签页
+        function initTabs() {
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            const tabContents = document.querySelectorAll('.tab-content');
+
+            tabBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const tabId = this.dataset.tab;
+                    currentTable = tabId;
+
+                    // 移除所有活动状态
+                    tabBtns.forEach(b => b.classList.remove('active'));
+                    tabContents.forEach(c => c.classList.remove('active'));
+
+                    // 添加当前活动状态
+                    this.classList.add('active');
+                    document.getElementById(tabId).classList.add('active');
+                });
+            });
+        }
+
+        // 加载空调使用记录
+        function loadDetailRecords() {
+            fetch('/api/db/detail_records')
+                .then(response => response.json())
+                .then(data => {
+                    const tbody = document.getElementById('detail-records-body');
+                    tbody.innerHTML = '';
+
+                    if (data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="12" class="no-data">没有找到记录</td></tr>';
+                        return;
+                    }
+
+                    data.forEach(record => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${record.id}</td>
+                            <td>${record.room_id}</td>
+                            <td>${record.start_time}</td>
+                            <td>${record.end_time || '-'}</td>
+                            <td>${record.mode}</td>
+                            <td>${record.target_temp}</td>
+                            <td>${record.fan_speed}</td>
+                            <td>${record.fee_rate.toFixed(2)}</td>
+                            <td>${record.cost.toFixed(2)}</td>
+                            <td>${record.operation_type}</td>
+                            <td>
+                                <button class="action-btn edit-btn" onclick="editRecord(${record.id}, 'detail_records')">编辑</button>
+                                <button class="action-btn delete-btn" onclick="deleteRecord(${record.id}, 'detail_records')">删除</button>
+                            </td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                })
+                .catch(error => {
+                    console.error('加载数据失败:', error);
+                    alert('加载数据失败');
+                });
+        }
+
+        // 加载入住记录
+        function loadCheckinRecords() {
+            fetch('/api/db/checkin_records')
+                .then(response => response.json())
+                .then(data => {
+                    const tbody = document.getElementById('checkin-records-body');
+                    tbody.innerHTML = '';
+
+                    if (data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="7" class="no-data">没有找到记录</td></tr>';
+                        return;
+                    }
+
+                    data.forEach(record => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${record.id}</td>
+                            <td>${record.room_id}</td>
+                            <td>${record.guest_name}</td>
+                            <td>${record.checkin_time}</td>
+                            <td>${record.checkout_time || '-'}</td>
+                            <td>${record.status}</td>
+                            <td>
+                                <button class="action-btn edit-btn" onclick="editRecord(${record.id}, 'checkin_records')">编辑</button>
+                                <button class="action-btn delete-btn" onclick="deleteRecord(${record.id}, 'checkin_records')">删除</button>
+                            </td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                })
+                .catch(error => {
+                    console.error('加载数据失败:', error);
+                    alert('加载数据失败');
+                });
+        }
+
+        // 清除空调使用记录表内容
+        function clearDetailTable() {
+            if (confirm('确定要清空空调使用记录表中的所有内容吗？')) {
+                fetch('/api/db/detail_records', {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        alert('清空成功');
+                        loadDetailRecords();
+                    } else {
+                        alert('清空失败: ' + result.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('清空失败:', error);
+                    alert('清空失败');
+                });
+            }
+        }
+
+        // 清除入住记录表内容
+        function clearCheckinTable() {
+            if (confirm('确定要清空入住记录表中的所有内容吗？')) {
+                fetch('/api/db/checkin_records', {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        alert('清空成功');
+                        loadCheckinRecords();
+                    } else {
+                        alert('清空失败: ' + result.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('清空失败:', error);
+                    alert('清空失败');
+                });
+            }
+        }
+
+        // 编辑记录
+        function editRecord(id, tableName) {
+            fetch(`/api/db/${tableName}/${id}`)
+                .then(response => response.json())
+                .then(record => {
+                    document.getElementById('record-id').value = id;
+                    document.getElementById('table-name').value = tableName;
+
+                    const formFields = document.getElementById('form-fields');
+                    formFields.innerHTML = '';
+
+                    // 根据表名动态生成表单字段
+                    if (tableName === 'detail_records') {
+                        const fields = [
+                            { name: 'room_id', label: '房间ID', type: 'number' },
+                            { name: 'start_time', label: '开始时间', type: 'datetime-local' },
+                            { name: 'end_time', label: '结束时间', type: 'datetime-local' },
+                            { name: 'mode', label: '模式', type: 'select', options: ['cool', 'heat', 'dry', 'fan'] },
+                            { name: 'target_temp', label: '目标温度', type: 'number', step: '0.5' },
+                            { name: 'fan_speed', label: '风速', type: 'select', options: ['LOW', 'MEDIUM', 'HIGH'] },
+                            { name: 'fee_rate', label: '费率', type: 'number', step: '0.01' },
+                            { name: 'cost', label: '费用', type: 'number', step: '0.01' },
+                            { name: 'operation_type', label: '操作类型', type: 'text' }
+                        ];
+
+                        fields.forEach(field => {
+                            const div = document.createElement('div');
+                            div.className = 'form-group';
+                            
+                            const label = document.createElement('label');
+                            label.textContent = field.label;
+                            
+                            let input;
+                            if (field.type === 'select') {
+                                input = document.createElement('select');
+                                field.options.forEach(opt => {
+                                    const option = document.createElement('option');
+                                    option.value = opt;
+                                    option.textContent = opt;
+                                    if (opt === record[field.name]) {
+                                        option.selected = true;
+                                    }
+                                    input.appendChild(option);
+                                });
+                            } else {
+                                input = document.createElement('input');
+                                input.type = field.type;
+                                input.value = record[field.name] || '';
+                                if (field.step) {
+                                    input.step = field.step;
+                                }
+                            }
+                            input.name = field.name;
+                            input.id = field.name;
+
+                            div.appendChild(label);
+                            div.appendChild(input);
+                            formFields.appendChild(div);
+                        });
+                    } else if (tableName === 'checkin_records') {
+                        const fields = [
+                            { name: 'room_id', label: '房间ID', type: 'number' },
+                            { name: 'guest_name', label: '客人姓名', type: 'text' },
+                            { name: 'checkin_time', label: '入住时间', type: 'datetime-local' },
+                            { name: 'checkout_time', label: '退房时间', type: 'datetime-local' },
+                            { name: 'status', label: '状态', type: 'select', options: ['CHECKED_IN', 'CHECKED_OUT'] }
+                        ];
+
+                        fields.forEach(field => {
+                            const div = document.createElement('div');
+                            div.className = 'form-group';
+                            
+                            const label = document.createElement('label');
+                            label.textContent = field.label;
+                            
+                            let input;
+                            if (field.type === 'select') {
+                                input = document.createElement('select');
+                                field.options.forEach(opt => {
+                                    const option = document.createElement('option');
+                                    option.value = opt;
+                                    option.textContent = opt;
+                                    if (opt === record[field.name]) {
+                                        option.selected = true;
+                                    }
+                                    input.appendChild(option);
+                                });
+                            } else {
+                                input = document.createElement('input');
+                                input.type = field.type;
+                                input.value = record[field.name] || '';
+                            }
+                            input.name = field.name;
+                            input.id = field.name;
+
+                            div.appendChild(label);
+                            div.appendChild(input);
+                            formFields.appendChild(div);
+                        });
+                    }
+
+                    // 显示模态框
+                    document.getElementById('edit-modal').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('获取记录失败:', error);
+                    alert('获取记录失败');
+                });
+        }
+
+        // 关闭模态框
+        function closeModal() {
+            document.getElementById('edit-modal').style.display = 'none';
+        }
+
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('edit-modal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        // 保存记录
+        function saveRecord() {
+            const id = document.getElementById('record-id').value;
+            const tableName = document.getElementById('table-name').value;
+            const formData = new FormData(document.getElementById('edit-form'));
+            const recordData = {};
+
+            // 转换日期时间格式
+            formData.forEach((value, key) => {
+                if (value) {
+                    // 处理datetime-local格式转换为SQLite兼容格式
+                    if (key.includes('time') && value.includes('T')) {
+                        recordData[key] = value.replace('T', ' ');
+                    } else {
+                        recordData[key] = value;
+                    }
+                } else {
+                    recordData[key] = null;
+                }
+            });
+
+            fetch(`/api/db/${tableName}/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(recordData)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    alert('保存成功');
+                    closeModal();
+                    // 重新加载数据
+                    if (tableName === 'detail_records') {
+                        loadDetailRecords();
+                    } else if (tableName === 'checkin_records') {
+                        loadCheckinRecords();
+                    }
+                } else {
+                    alert('保存失败: ' + result.error);
+                }
+            })
+            .catch(error => {
+                console.error('保存失败:', error);
+                alert('保存失败');
+            });
+        }
+
+        // 删除记录
+        function deleteRecord(id, tableName) {
+            if (confirm('确定要删除这条记录吗？')) {
+                fetch(`/api/db/${tableName}/${id}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        alert('删除成功');
+                        // 重新加载数据
+                        if (tableName === 'detail_records') {
+                            loadDetailRecords();
+                        } else if (tableName === 'checkin_records') {
+                            loadCheckinRecords();
+                        }
+                    } else {
+                        alert('删除失败: ' + result.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('删除失败:', error);
+                    alert('删除失败');
+                });
+            }
+        }
+        
+
+        
+        // 页面加载完成后执行初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initTabs(); // 初始化标签页
+            loadDetailRecords(); // 初始加载空调使用记录
+            loadCheckinRecords(); // 初始加载入住记录
+            bindFilterEvents(); // 绑定筛选事件
+        });
+
+        // 为新标签页添加加载事件
+        function initTabs() {
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            const tabContents = document.querySelectorAll('.tab-content');
+
+            tabBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const tabId = this.dataset.tab;
+                    currentTable = tabId;
+
+                    // 移除所有活动状态
+                    tabBtns.forEach(b => b.classList.remove('active'));
+                    tabContents.forEach(c => c.classList.remove('active'));
+
+                    // 添加当前活动状态
+                    this.classList.add('active');
+                    document.getElementById(tabId).classList.add('active');
+
+                    // 如果是房间初始化标签页，加载房间状态
+                    if (tabId === 'room-initialization') {
+                        loadRoomStatus();
+                    }
+                });
+            });
+        }
+    </script>
+</body>
+</html>
