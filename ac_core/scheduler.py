@@ -27,16 +27,35 @@ class Scheduler:
         self.service_timer = ServiceTimer()
         self.wait_timer = WaitTimer()
         self.server = Server(rooms)
+        # 将调度器自身传递给server，以便server可以访问队列管理功能
+        self.server.scheduler = self
         self.detail_record = detail_record
         self.time_slice = time_slice_seconds
         # 记录当前正在服务的详单记录 id：room_id -> detail_record_id
         self.current_record_ids: Dict[int, int] = {}
-
+        
+        # 设置队列的排序回调函数
+        self.served_queue.set_sort_callback(lambda rid: (
+            # 风速高的优先（按风速值降序）
+            -self.rooms.get(rid).fan_speed.value,
+            # 风速相同时，服务时间长的优先（按服务时间降序）
+            -self.service_timer.get_service_time(rid)
+        ))
+        # 初始化时立即排序，确保顺序正确
+        self.served_queue._sort_rooms()
+        
+        self.waiting_queue.set_sort_callback(lambda rid: (
+            # 风速高的优先（按风速值降序）
+            -self.rooms.get(rid).fan_speed.value,
+            # 风速相同时，等待时间长的优先（按等待时间降序）
+            -self.wait_timer.get_wait_time(rid)
+        ))
     # ---------- 请求入口 ----------
     def power_on(self, room_id: int, current_room_temp: float, mode: Mode = Mode.COOL) -> Dict:
         """
         PowerOn(RoomId, CurrentRoomTemp, Mode)
         """
+        # 检查服务队列是否有空位
         state = self.served_queue.check()
         if state.has_slot:
             # 进入服务队列
@@ -61,7 +80,61 @@ class Scheduler:
                 "current_fee": 0.0,
                 "total_fee": self.detail_record.get_room_total(room_id)["total_cost"],
             }
-        # 无空位，进入等待队列
+        # 无空位，检查是否可以通过风速优先级替换进入服务队列
+        served_rooms = self.served_queue.all_rooms()
+        if served_rooms:
+            new_room_speed = self.rooms.get(room_id).fan_speed.value
+            
+            # 情况1: 找到风速低于新请求的房间
+            lower_speed_rooms = [rid for rid in served_rooms if self.rooms.get(rid).fan_speed.value < new_room_speed]
+            
+            # 情况2: 风速相同时，不允许直接替换，必须通过时间片调度机制
+            # 新开机的房间等待时间为0，不应该替换任何已在服务队列中的同风速房间
+            equal_speed_rooms = []  # 风速相同时，新请求应该进入等待队列
+            
+            # 合并需要替换的房间列表
+            replaceable_rooms = lower_speed_rooms + equal_speed_rooms
+            
+            if replaceable_rooms:
+                # 选择要替换的房间：风速最低，风速相同时选择服务时间最长的
+                if len(set(self.rooms.get(rid).fan_speed.value for rid in replaceable_rooms)) == 1:
+                    # 所有房间风速相同，选择服务时间最长的
+                    victim = max(replaceable_rooms, key=lambda rid: self.service_timer.get_service_time(rid))
+                else:
+                    # 风速不同，选择风速最低的
+                    victim = min(replaceable_rooms, key=lambda rid: self.rooms.get(rid).fan_speed.value)
+                
+                # 执行替换：将低优先级服务对象移至等待队列，新请求进入服务队列
+                self.served_queue.pop(victim)
+                self.rooms.get(victim).state = PowerState.WAITING
+                self.service_timer.remove_timer(victim)
+                self.waiting_queue.push(victim)
+                self.wait_timer.create_timer(victim)
+                
+                # 新房间进入服务队列
+                self.served_queue.push(room_id)
+                mode, target_temp, fee_rate = self.server.set_target(room_id, current_room_temp, mode)
+                self.service_timer.reset_timer(room_id)
+                record_id = self.detail_record.create_record(
+                    room_id=room_id,
+                    start_time=self._now_str(),
+                    mode=mode,
+                    target_temp=target_temp,
+                    fan_speed=self.rooms.get(room_id).fan_speed.name,
+                    fee_rate=fee_rate,
+                    operation_type="PRIORITY_REPLACE",
+                )
+                self.current_record_ids[room_id] = record_id
+                return {
+                    "room_id": room_id,
+                    "state": "serving",
+                    "mode": mode,
+                    "target_temp": target_temp,
+                    "current_fee": 0.0,
+                    "total_fee": self.detail_record.get_room_total(room_id)["total_cost"],
+                }
+        
+        # 无法通过优先级替换，进入等待队列
         self.waiting_queue.push(room_id)
         self.wait_timer.create_timer(room_id)
         room = self.rooms.get(room_id)
@@ -82,6 +155,8 @@ class Scheduler:
         room.fan_speed = new_speed
         
         if self.served_queue.contains(room_id):
+            # 无论风速增减，都重新排序队列以确保优先级正确
+            self.served_queue._sort_rooms()
             # 服务中更新风速与费率
             fee_rate = self.server.update_speed(room_id, new_speed)
             
@@ -108,10 +183,13 @@ class Scheduler:
                         operation_type="SPEED_CHANGE",
                     )
                     self.current_record_ids[room_id] = new_record_id
-            # 如果风速提高，需要重新评估服务队列
+            # 如果风速发生变化，需要重新评估服务队列
             if new_speed.value > old_speed.value:
                 # 风速提高，视为优先级提升，检查是否有更低风速的服务对象需要替换
                 self._priority_schedule(room_id)
+            elif new_speed.value < old_speed.value:
+                # 风速降低，检查等待队列中是否有满足条件的房间可以进入服务队列
+                self._check_waiting_queue_after_speed_decrease(room_id)
             return {"ok": "SOk"}
         
         if self.waiting_queue.contains(room_id):
@@ -150,95 +228,107 @@ class Scheduler:
             
             return {"ok": "SOk"}
         
-        # 既不在服务也不在等待，视为未开机
+        # 检查房间实际状态
         return {
             "room_id": room_id,
-            "state": "off",
+            "state": room.state.value.lower(),
         }
         
     def _priority_schedule(self, room_id: int) -> None:
         """
-        优先级调度：当服务队列中的房间风速提高时，检查是否有更低风速的服务对象需要替换
+        优先级调度：当服务队列中的房间风速提高时，仅重新排序服务队列，不再进行房间替换
         """
+        # 仅重新排序服务队列，确保风速提高的房间获得更高优先级
+        self.served_queue._sort_rooms()
+        # 记录风速调整操作
         room = self.rooms.get(room_id)
-        new_speed = room.fan_speed
-        
-        # 计算有多少个服务对象的风速低于当前房间风速
+        fee_rate = self.server._calc_fee_rate(room.fan_speed)
+        self.detail_record.create_record(
+            room_id=room_id,
+            start_time=self._now_str(),
+            mode=room.mode.value,
+            target_temp=room.target_temp,
+            fan_speed=room.fan_speed.name,
+            fee_rate=fee_rate,
+            operation_type="SPEED_ADJUST_PRIORITY",
+        )
+    
+    def _check_waiting_queue_after_speed_decrease(self, room_id: int) -> None:
+        """
+        风速降低后检查等待队列：如果服务队列中某个房间优先级降低，检查等待队列中是否有更高优先级的房间可以替换
+        """
+        # 获取当前服务队列中的所有房间
         served_rooms = self.served_queue.all_rooms()
-        lower_speed_rooms = [rid for rid in served_rooms if rid != room_id and self.rooms.get(rid).fan_speed.value < new_speed.value]
         
-        if lower_speed_rooms:
-            # 2.1.1 如果只有1个风速低于的服务对象
-            if len(lower_speed_rooms) == 1:
-                victim = lower_speed_rooms[0]
-            # 2.1.2 如果有多个服务对象的风速相等且低于请求对象
-            elif len(set(self.rooms.get(rid).fan_speed.value for rid in lower_speed_rooms)) == 1:
-                # 选择服务时长最大的服务对象
-                victim = max(lower_speed_rooms, key=lambda rid: self.service_timer.get_service_time(rid))
-            # 2.1.3 如果多个服务对象的风速低于请求风速，且风速不相等
-            else:
-                # 选择风速最低的服务对象
-                victim = min(lower_speed_rooms, key=lambda rid: self.rooms.get(rid).fan_speed.value)
+        # 如果服务队列已满，检查是否有等待队列中的房间优先级高于当前服务队列中的最低优先级房间
+        if len(served_rooms) >= self.served_queue.capacity and self.waiting_queue.all_rooms():
+            # 找到服务队列中优先级最低的房间（风速最低、服务时间最短）
+            lowest_priority_served = min(
+                served_rooms,
+                key=lambda rid: (self.rooms.get(rid).fan_speed.value, self.service_timer.get_service_time(rid))
+            )
             
-            # 执行替换：将受害者移到等待队列
-            self.waiting_queue.push(victim)
-            self.served_queue.pop(victim)
-            self.rooms.get(victim).state = PowerState.WAITING
-            self.service_timer.reset_timer(victim)
-            if self.wait_timer.get_wait_time(victim) == 0:
-                self.wait_timer.create_timer(victim)
+            # 找到等待队列中优先级最高的房间（等待时间最长）
+            waiting_rooms = self.waiting_queue.all_rooms()
+            highest_priority_waiting = max(
+                waiting_rooms,
+                key=lambda rid: self.wait_timer.get_wait_time(rid)
+            )
             
-            # 检查服务队列是否有空位，如果有，从等待队列中选择优先级最高的房间填充
-            if self.waiting_queue.all_rooms():
-                # 从等待队列中选择等待时间最久的房间
-                waiting_rooms = self.waiting_queue.all_rooms()
-                selected = max(
-                    waiting_rooms,
-                    key=lambda rid: self.wait_timer.get_wait_time(rid)
-                )
+            # 检查等待队列中的房间是否满足等待时间要求（等待时间 >= 时间片）
+            waiting_time = self.wait_timer.get_wait_time(highest_priority_waiting)
+            if waiting_time >= self.time_slice:
+                # 比较优先级：等待队列中的房间优先级是否高于服务队列中最低优先级的房间
+                served_priority = self.rooms.get(lowest_priority_served).fan_speed.value
+                waiting_priority = self.rooms.get(highest_priority_waiting).fan_speed.value
                 
-                # 将选中的房间从等待队列移至服务队列
-                self.waiting_queue.pop(selected)
-                self.served_queue.push(selected)
-                self.rooms.get(selected).state = PowerState.SERVING
-                self.service_timer.reset_timer(selected)
-                self.wait_timer._waiting_seconds.pop(selected, None)
-                
-                # 更新服务队列的详单记录
-                fee_rate = self.server._calc_fee_rate(self.rooms.get(selected).fan_speed)
-                record_id = self.current_record_ids.get(selected)
-                if record_id is None:
-                    record_id = self.detail_record.create_record(
-                        room_id=selected,
-                        start_time=self._now_str(),
-                        mode=self.rooms.get(selected).mode.value,
-                        target_temp=self.rooms.get(selected).target_temp,
-                        fan_speed=self.rooms.get(selected).fan_speed.name,
-                        fee_rate=fee_rate,
-                        operation_type="SERVING_RESUME",
-                    )
-                    self.current_record_ids[selected] = record_id
-                else:
-                    self.detail_record.update_fee_rate(record_id, fee_rate, self.rooms.get(selected).fan_speed.name)
+                # 如果等待队列中的房间优先级更高，进行替换
+                if waiting_priority > served_priority:
+                    self._replace_served_with_waiting(lowest_priority_served, highest_priority_waiting)
                 
     def _replace_served_with_waiting(self, victim: int, waiting_room: int) -> None:
         """
         将服务队列中的受害者替换为等待队列中的房间
         """
-        # 从服务队列移除受害者
+        # 先从服务队列移除受害者
         self.served_queue.pop(victim)
-        self.waiting_queue.push(victim)
+        
+        # 确保房间能添加到等待队列：如果队列已满，移除优先级最低的等待房间
+        if self.waiting_queue.capacity != -1 and len(self.waiting_queue.all_rooms()) >= self.waiting_queue.capacity and not self.waiting_queue.contains(victim):
+            # 找到等待队列中优先级最低的房间并移除
+            wait_rooms = self.waiting_queue.all_rooms()
+            if len(wait_rooms) > 0:
+                # 选择风速最低、等待时间最短的房间移除
+                lowest_priority_room = min(wait_rooms, key=lambda rid: (self.rooms.get(rid).fan_speed.value, self.wait_timer.get_wait_time(rid)))
+                self.waiting_queue.pop(lowest_priority_room)
+                # 将移除的房间状态设置为暂停，避免状态不一致
+                self.rooms.get(lowest_priority_room).state = PowerState.PAUSED
+                self.wait_timer._waiting_seconds.pop(lowest_priority_room, None)
+        
+        # 如果房间已经在队列中，先移除再添加，确保状态一致
+        if self.waiting_queue.contains(victim):
+            self.waiting_queue.pop(victim)
+        # 尝试添加到等待队列
+        if self.waiting_queue.capacity == -1 or len(self.waiting_queue.all_rooms()) < self.waiting_queue.capacity:
+            self.waiting_queue.push(victim)
+        
+        # 无论是否成功添加到等待队列，都更新状态为等待
         self.rooms.get(victim).state = PowerState.WAITING
-        self.service_timer.reset_timer(victim)
+        self.service_timer.remove_timer(victim)
         if self.wait_timer.get_wait_time(victim) == 0:
             self.wait_timer.create_timer(victim)
         
-        # 将等待房间移至服务队列
-        self.waiting_queue.pop(waiting_room)
-        self.served_queue.push(waiting_room)
-        self.rooms.get(waiting_room).state = PowerState.SERVING
-        self.service_timer.reset_timer(waiting_room)
-        self.wait_timer._waiting_seconds.pop(waiting_room, None)
+        # 确保服务队列有容量后才添加
+        if self.served_queue.check().has_slot:
+            # 将等待房间移至服务队列
+            self.waiting_queue.pop(waiting_room)
+            self.served_queue.push(waiting_room)
+            self.rooms.get(waiting_room).state = PowerState.SERVING
+            self.service_timer.reset_timer(waiting_room)
+            self.wait_timer._waiting_seconds.pop(waiting_room, None)
+        else:
+            # 服务队列已满，无法添加新房间，保持等待状态
+            pass
     
     def adjust_temperature(self, room_id: int, new_target_temp: float) -> Dict:
         """
@@ -273,18 +363,20 @@ class Scheduler:
                 operation_type="TEMP_CHANGE",
             )
             return {"ok": "SOk"}
-        # 既不在服务也不在等待，视为未开机
+        # 检查房间实际状态
         return {
             "room_id": room_id,
-            "state": "off",
+            "state": room.state.value.lower(),
         }
 
     def power_off(self, room_id: int) -> Dict:
         room = self.rooms.get(room_id)
         if self.served_queue.contains(room_id):
             self.served_queue.pop(room_id)
+            self.service_timer.remove_timer(room_id)
         if self.waiting_queue.contains(room_id):
             self.waiting_queue.pop(room_id)
+            self.wait_timer._waiting_seconds.pop(room_id, None)
         room.state = PowerState.OFF
         # 结束当前详单记录
         record_id = self.current_record_ids.pop(room_id, None)
@@ -320,6 +412,8 @@ class Scheduler:
         # 更新计时器
         self.service_timer.tick(1)
         self.wait_timer.tick(1)
+        # 服务时间更新后立即触发排序
+        self.served_queue._sort_rooms()
 
         # 记录服务状态变化（用于检测目标温度到达）
         before_states = {rid: room.state for rid, room in self.rooms.rooms.items()}
@@ -356,6 +450,11 @@ class Scheduler:
             after_state = after_states[room_id]
             if before_state == PowerState.SERVING and after_state in [PowerState.PAUSED, PowerState.OFF]:
                 state_changed_rooms.append(room_id)
+                # 从服务队列中移除已暂停/关闭的房间
+                if room_id in self.served_queue.all_rooms():
+                    self.served_queue.pop(room_id)
+                    # 从服务计时器中移除房间，确保不再计时
+                    self.service_timer.remove_timer(room_id)
                 # 为状态变化的房间设置详单记录结束时间
                 record_id = self.current_record_ids.get(room_id)
                 if record_id is not None:
@@ -369,51 +468,70 @@ class Scheduler:
                         )
                     # 从当前记录ID字典中移除
                     self.current_record_ids.pop(room_id, None)
+                    
+        # 重要：当服务队列因状态变化出现空位时，不自动从等待队列调度房间
+        # 等待队列中的房间应通过power_on方法或时间片调度逻辑进入服务队列
+        # 这样可以避免在状态变化时错误地将等待队列中的房间移至服务队列
         
-        # 如果有服务对象释放，让等待队列中的等待服务时长最久的对象获得服务（2.2.3）
-        if state_changed_rooms and self.waiting_queue.all_rooms():
-            # 从等待队列中选择等待时间最久的房间
-            waiting_rooms = self.waiting_queue.all_rooms()
-            selected = max(
-                waiting_rooms,
-                key=lambda rid: self.wait_timer.get_wait_time(rid)
-            )
-            
-            # 将选中的房间从等待队列移至服务队列
-            self.waiting_queue.pop(selected)
-            self.served_queue.push(selected)
-            self.rooms.get(selected).state = PowerState.SERVING
-            self.service_timer.reset_timer(selected)
-            self.wait_timer._waiting_seconds.pop(selected, None)
-            
-            # 为新进入服务的房间创建新的详单记录
-            room = self.rooms.get(selected)
-            fee_rate = self.server._calc_fee_rate(room.fan_speed)
-            record_id = self.detail_record.create_record(
-                room_id=selected,
-                start_time=self._now_str(),
-                mode=room.mode,
-                target_temp=room.target_temp,
-                fan_speed=room.fan_speed.name,
-                fee_rate=fee_rate,
-                operation_type="SERVING_RESUME",
-            )
-            self.current_record_ids[selected] = record_id
-
-        # 时间片调度：等待时间达到 time_slice 的同风速请求轮转
+        # 仅执行时间片调度，处理等待超时的同风速请求
+        # 时间片调度逻辑会根据预设条件决定是否进行替换
         self._time_slice_schedule()
+
+    def _on_room_state_changed(self, room_id: int, new_state: PowerState) -> None:
+        """
+        当房间状态发生变化时的回调方法
+        """
+        room = self.rooms.get(room_id)
+        
+        # 如果房间从SERVING变为PAUSED或OFF，需要立即从服务队列中移除
+        if room.state == PowerState.SERVING and new_state in [PowerState.PAUSED, PowerState.OFF]:
+            if room_id in self.served_queue.all_rooms():
+                self.served_queue.pop(room_id)
+                # 从服务计时器中移除房间，确保不再计时
+                self.service_timer.remove_timer(room_id)
+            
+            # 为状态变化的房间设置详单记录结束时间
+            record_id = self.current_record_ids.get(room_id)
+            if record_id is not None:
+                # 获取当前记录的费用
+                current_record = self.detail_record.get_record(record_id)
+                if current_record:
+                    self.detail_record.update_on_service(
+                        record_id,
+                        cost=current_record["cost"],
+                        end_time=self._now_str(),
+                    )
+                # 从当前记录ID字典中移除
+                self.current_record_ids.pop(room_id, None)
+        
+        # 更新房间状态
+        room.state = new_state
+
+        # 重新排序服务队列，确保服务时间变化能影响排序顺序
+        self.served_queue._sort_rooms()
+        
+        # 注意：在_on_room_state_changed中不应该自动调度等待队列中的房间
+        # 调度逻辑应该在power_on方法中根据优先级规则处理，或者在tick方法中定期执行
+        # 避免在状态变化时错误调度，导致新开机房间被错误处理
 
     def _time_slice_schedule(self) -> None:
         """
         时间片调度：当等待队列中有同风速的请求，按照等待时间优先级进行调度
         
         策略：
-        1. 2.2.1-2.2.4：风速相等时的调度策略
+        1. 只有当服务队列已满时，才执行时间片调度
+        2. 风速相等时的调度策略：
            - 等待时间越长，优先级越高
            - 等待满time_slice的请求优先于未等待满的
            - 等待时间相同，优先处理已等待满time_slice的
         """
-        if not self.waiting_queue.all_rooms() or len(self.served_queue.all_rooms()) == 0:
+        # 注意：时间片调度是一个独立的调度机制，与power_on方法中的风速优先级调度互不干扰
+        # power_on方法负责新开机房间的初始调度（风速优先级为主）
+        # 时间片调度负责同风速房间之间的轮换（等待时间为主）
+        # 两者应该协同工作但不应该互相干扰
+        
+        # 只有当服务队列已满且等待队列不为空时才执行时间片调度
+        if not self.waiting_queue.all_rooms() or len(self.served_queue.all_rooms()) < self.served_queue.capacity:
             return
 
         # 获取服务队列的风速分布
@@ -455,9 +573,29 @@ class Scheduler:
 
                 # 执行替换
                 self.served_queue.pop(victim)
-                self.waiting_queue.push(victim)
+                
+                # 确保房间能添加到等待队列：如果队列已满，移除优先级最低的等待房间
+                if self.waiting_queue.capacity != -1 and len(self.waiting_queue.all_rooms()) >= self.waiting_queue.capacity and not self.waiting_queue.contains(victim):
+                    # 找到等待队列中优先级最低的房间并移除
+                    wait_rooms = self.waiting_queue.all_rooms()
+                    if len(wait_rooms) > 0:
+                        # 选择风速最低、等待时间最短的房间移除
+                        lowest_priority_room = min(wait_rooms, key=lambda rid: (self.rooms.get(rid).fan_speed.value, self.wait_timer.get_wait_time(rid)))
+                        self.waiting_queue.pop(lowest_priority_room)
+                        # 将移除的房间状态设置为暂停，避免状态不一致
+                        self.rooms.get(lowest_priority_room).state = PowerState.PAUSED
+                        self.wait_timer._waiting_seconds.pop(lowest_priority_room, None)
+                
+                # 如果房间已经在队列中，先移除再添加，确保状态一致
+                if self.waiting_queue.contains(victim):
+                    self.waiting_queue.pop(victim)
+                # 尝试添加到等待队列
+                if self.waiting_queue.capacity == -1 or len(self.waiting_queue.all_rooms()) < self.waiting_queue.capacity:
+                    self.waiting_queue.push(victim)
+                
+                # 无论是否成功添加到等待队列，都更新状态为等待
                 self.rooms.get(victim).state = PowerState.WAITING
-                self.service_timer.reset_timer(victim)
+                self.service_timer.remove_timer(victim)
                 # 分配等待服务时长s秒（2.2.2）
                 self.wait_timer.reset_timer(victim)  # 重置为0，开始新的等待周期
                 if victim not in self.wait_timer._waiting_seconds:
@@ -472,6 +610,46 @@ class Scheduler:
                 self.wait_timer._waiting_seconds.pop(selected, None)
 
                 break  # 每次只执行一次替换
+    
+    def validate_scheduling_logic(self) -> bool:
+        """
+        内部验证方法，用于测试调度逻辑的正确性
+        返回True表示逻辑正确，False表示存在问题
+        """
+        # 检查tick_one_second方法中是否正确移除了自动调度代码
+        import inspect
+        source = inspect.getsource(self._tick_one_second)
+        
+        # 检查是否包含不应存在的自动调度代码模式
+        forbidden_patterns = [
+            "self.served_queue.is_full()",  # 不应该在tick_one_second中检查队列是否已满
+            "self.waiting_queue.size() > 0",  # 不应该在tick_one_second中检查等待队列
+            "self.waiting_queue.get_all_rooms()",  # 不应该在tick_one_second中获取等待队列房间
+            "self._replace_room",  # 不应该在tick_one_second中直接替换房间
+            "self.waiting_queue.pop",  # 不应该在tick_one_second中从等待队列移除房间
+            "self.served_queue.push",  # 不应该在tick_one_second中向服务队列添加房间
+        ]
+        
+        # 检查是否包含这些禁止的模式
+        for pattern in forbidden_patterns:
+            if pattern in source:
+                print(f"错误: _tick_one_second方法中包含禁止的代码模式: {pattern}")
+                return False
+        
+        # 检查power_on方法中的同风速处理逻辑是否正确
+        power_on_source = inspect.getsource(self.power_on)
+        if "equal_speed_rooms = []" not in power_on_source:
+            print("错误: power_on方法中缺少正确的同风速房间处理逻辑")
+            return False
+        
+        # 检查_on_room_state_changed方法是否有正确注释
+        if hasattr(self, '_on_room_state_changed'):
+            state_changed_source = inspect.getsource(self._on_room_state_changed)
+            if "不应自动调度等待队列房间" not in state_changed_source:
+                print("警告: _on_room_state_changed方法缺少必要的注释")
+        
+        print("调度逻辑验证通过！")
+        return True
 
     # ---------- 查询与报表 ----------
     def get_room_status(self, room_id: int) -> Dict:

@@ -723,27 +723,45 @@
 
         // 为新标签页添加加载事件
         function initTabs() {
-            const tabBtns = document.querySelectorAll('.tab-btn');
+            const tabs = document.querySelectorAll('.tab-item');
             const tabContents = document.querySelectorAll('.tab-content');
-
-            tabBtns.forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const tabId = this.dataset.tab;
-                    currentTable = tabId;
-
-                    // 移除所有活动状态
-                    tabBtns.forEach(b => b.classList.remove('active'));
-                    tabContents.forEach(c => c.classList.remove('active'));
-
-                    // 添加当前活动状态
-                    this.classList.add('active');
-                    document.getElementById(tabId).classList.add('active');
-
-                    // 如果是房间初始化标签页，加载房间状态
-                    if (tabId === 'room-initialization') {
+            
+            // 为每个标签页添加点击事件
+            tabs.forEach((tab, index) => {
+                tab.addEventListener('click', () => {
+                    // 移除所有标签页的活跃状态
+                    tabs.forEach(t => t.classList.remove('active'));
+                    // 隐藏所有内容区域
+                    tabContents.forEach(content => content.classList.remove('active'));
+                    
+                    // 激活当前标签页和对应内容
+                    tab.classList.add('active');
+                    tabContents[index].classList.add('active');
+                    
+                    // 根据选中的标签页加载对应数据
+                    if (tab.textContent.trim() === '空调使用记录') {
+                        loadDetailRecords();
+                    } else if (tab.textContent.trim() === '入住记录') {
+                        loadCheckinRecords();
+                    } else if (tab.textContent.trim() === '房间初始化') {
                         loadRoomStatus();
+                        // 添加定时刷新，每秒更新一次房间状态
+                        if (window.roomStatusInterval) {
+                            clearInterval(window.roomStatusInterval);
+                        }
+                        window.roomStatusInterval = setInterval(loadRoomStatus, 1000);
                     }
                 });
+            });
+            
+            // 默认选中第一个标签页
+            tabs[0].click();
+            
+            // 添加页面卸载时清理定时器的逻辑，防止内存泄漏
+            window.addEventListener('beforeunload', () => {
+                if (window.roomStatusInterval) {
+                    clearInterval(window.roomStatusInterval);
+                }
             });
         }
     </script>

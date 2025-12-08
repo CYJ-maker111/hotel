@@ -13,6 +13,7 @@ async function fetchJSON(url, options) {
 function stateBadge(state) {
     if (state === "serving") return '<span class="badge serving">送风</span>';
     if (state === "waiting") return '<span class="badge waiting">等待</span>';
+    if (state === "paused") return '<span class="badge paused">暂停</span>';
     return '<span class="badge off">关机</span>';
 }
 
@@ -428,6 +429,29 @@ function switchView(view) {
     });
 }
 
+// 实时刷新房间状态和队列信息
+function startAutoRefresh() {
+    // 每秒自动刷新房间列表和队列状态
+    window.roomStatusInterval = setInterval(async () => {
+        if (currentView === "admin") {
+            try {
+                await loadRooms();
+                await loadQueues();
+            } catch (error) {
+                console.error("自动刷新失败:", error);
+            }
+        }
+    }, 1000);
+}
+
+// 停止自动刷新
+function stopAutoRefresh() {
+    if (window.roomStatusInterval) {
+        clearInterval(window.roomStatusInterval);
+        window.roomStatusInterval = null;
+    }
+}
+
 async function init() {
     // 导航切换
     const navAdmin = document.getElementById("nav-admin");
@@ -465,6 +489,12 @@ async function init() {
     // 前台、经理界面初始化
     initFrontdeskView();
     initManagerView();
+    
+    // 启动自动刷新
+    startAutoRefresh();
+    
+    // 页面卸载时清理定时器
+    window.addEventListener('beforeunload', stopAutoRefresh);
 }
 
 window.addEventListener("load", init);

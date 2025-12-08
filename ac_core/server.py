@@ -74,23 +74,79 @@ class Server:
 
             for _ in range(delta_seconds):
                 if room.mode == Mode.COOL:
-                    if room.current_temp > room.target_temp:
+                    if room.current_temp >= room.target_temp:
+                        # 如果当前温度等于目标温度，直接进入PAUSED状态
+                        if room.current_temp == room.target_temp:
+                            room.state = PowerState.PAUSED
+                            # 通知调度器房间状态变化，需要从服务队列移除
+                            if hasattr(self, 'scheduler') and self.scheduler is not None:
+                                self.scheduler._on_room_state_changed(room_id, PowerState.PAUSED)
+                            break
+                        # 如果当前温度大于目标温度，继续降温
                         room.current_temp -= temp_rate_per_sec
                         temp_change += temp_rate_per_sec
                         if room.current_temp <= room.target_temp:
                             room.current_temp = room.target_temp
                             # 达到目标温度，进入暂停服务（回温）状态
                             room.state = PowerState.PAUSED
+                            # 通知调度器房间状态变化，需要从服务队列移除
+                            if hasattr(self, 'scheduler') and self.scheduler is not None:
+                                self.scheduler._on_room_state_changed(room_id, PowerState.PAUSED)
                             break
+                    else:
+                        # 特殊情况：制冷模式下当前温度低于目标温度
+                        # 直接进入PAUSED状态，利用回温算法让温度自然上升，不计费
+                        room.state = PowerState.PAUSED
+                        # 通知调度器房间状态变化，需要从服务队列移除
+                        if hasattr(self, 'scheduler') and self.scheduler is not None:
+                            self.scheduler._on_room_state_changed(room_id, PowerState.PAUSED)
+                        # 在PAUSED状态下处理温度变化
+                        temp_rate_per_min = 0.5  # 回温速率：0.5℃/分钟
+                        temp_rate_per_sec = temp_rate_per_min / 60.0
+                        
+                        for _ in range(delta_seconds):
+                            room.current_temp += temp_rate_per_sec
+                            if room.current_temp >= room.target_temp:
+                                room.current_temp = room.target_temp
+                                break
+                        return 0.0  # 回温过程不计费
                 else:
-                    if room.current_temp < room.target_temp:
+                    if room.current_temp <= room.target_temp:
+                        # 如果当前温度等于目标温度，直接进入PAUSED状态
+                        if room.current_temp == room.target_temp:
+                            room.state = PowerState.PAUSED
+                            # 通知调度器房间状态变化，需要从服务队列移除
+                            if hasattr(self, 'scheduler') and self.scheduler is not None:
+                                self.scheduler._on_room_state_changed(room_id, PowerState.PAUSED)
+                            break
+                        # 如果当前温度小于目标温度，继续升温
                         room.current_temp += temp_rate_per_sec
                         temp_change += temp_rate_per_sec
                         if room.current_temp >= room.target_temp:
                             room.current_temp = room.target_temp
                             # 达到目标温度，进入暂停服务（回温）状态
                             room.state = PowerState.PAUSED
+                            # 通知调度器房间状态变化，需要从服务队列移除
+                            if hasattr(self, 'scheduler') and self.scheduler is not None:
+                                self.scheduler._on_room_state_changed(room_id, PowerState.PAUSED)
                             break
+                    else:
+                        # 特殊情况：制热模式下当前温度高于目标温度
+                        # 直接进入PAUSED状态，利用回温算法让温度自然下降，不计费
+                        room.state = PowerState.PAUSED
+                        # 通知调度器房间状态变化，需要从服务队列移除
+                        if hasattr(self, 'scheduler') and self.scheduler is not None:
+                            self.scheduler._on_room_state_changed(room_id, PowerState.PAUSED)
+                        # 在PAUSED状态下处理温度变化
+                        temp_rate_per_min = 0.5  # 回温速率：0.5℃/分钟
+                        temp_rate_per_sec = temp_rate_per_min / 60.0
+                        
+                        for _ in range(delta_seconds):
+                            room.current_temp -= temp_rate_per_sec
+                            if room.current_temp <= room.target_temp:
+                                room.current_temp = room.target_temp
+                                break
+                        return 0.0  # 回温过程不计费
              
 
 
@@ -108,17 +164,34 @@ class Server:
                     room.current_temp += temp_rate_per_sec
                     temp_change += temp_rate_per_sec
                     # 当室温回温1℃时重新发送温控请求
-                    if room.current_temp >= room.target_temp + 1.0:
-                        room.state = PowerState.SERVING
-                        break
+                    threshold_temp = room.target_temp + 1.0
+                    # 使用容差值解决浮点数精度问题
+                    tolerance = 0.001
+                    if room.current_temp >= threshold_temp - tolerance:
+                        room.state = PowerState.WAITING  # 进入等待队列，而不是直接SERVING
+                        # 确保重新添加到等待队列，由调度器决定何时进入服务队列
+                        if hasattr(self, 'scheduler') and self.scheduler is not None:
+                            if room_id not in self.scheduler.waiting_queue.all_rooms():
+                                # 将房间添加到等待队列
+                                self.scheduler.waiting_queue.push(room_id)
+                                # 重置等待计时器
+                                self.scheduler.wait_timer.reset_timer(room_id)
+                        return cost  # 状态变化后立即返回
                 else:
                     # 制热模式下，暂停后温度下降
                     room.current_temp -= temp_rate_per_sec
                     temp_change += temp_rate_per_sec
                     # 当室温回温1℃时重新发送温控请求
                     if room.current_temp <= room.target_temp - 1.0:
-                        room.state = PowerState.SERVING
-                        break
+                        room.state = PowerState.WAITING  # 进入等待队列，而不是直接SERVING
+                        # 确保重新添加到等待队列，由调度器决定何时进入服务队列
+                        if hasattr(self, 'scheduler') and self.scheduler is not None:
+                            if room_id not in self.scheduler.waiting_queue.all_rooms():
+                                # 将房间添加到等待队列
+                                self.scheduler.waiting_queue.push(room_id)
+                                # 重置等待计时器
+                                self.scheduler.wait_timer.reset_timer(room_id)
+                        return cost  # 状态变化后立即返回
             
 
             

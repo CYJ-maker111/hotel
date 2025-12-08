@@ -18,6 +18,13 @@ class ServiceTimer:
 
     def get_service_time(self, room_id: int) -> int:
         return self._served_seconds.get(room_id, 0)
+        
+    def remove_timer(self, room_id: int) -> None:
+        """
+        从服务计时器中移除房间ID，当房间离开服务队列时调用
+        """
+        if room_id in self._served_seconds:
+            del self._served_seconds[room_id]
 
 
 class WaitTimer:
