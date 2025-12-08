@@ -442,8 +442,8 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            current_temp: currentRoomStatus.current_temp || 25,
                             mode: currentRoomStatus.mode || 'COOL'
+                            // 不传递current_temp参数，使用房间的实际温度
                         })
                     });
                     
@@ -591,8 +591,8 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        current_temp: currentRoomStatus.current_temp || 25,
                         mode: mode.toUpperCase()
+                        // 不传递current_temp参数，使用房间的实际温度
                     })
                 });
                 // 重新加载房间状态

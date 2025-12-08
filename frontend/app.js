@@ -1,6 +1,15 @@
 let selectedRoomId = null;
 let currentView = "admin";
 
+// 测试相关全局变量
+let testRunning = false;
+let testPaused = false;
+let currentTestMinute = 0;
+let totalTestMinutes = 0;
+let testSimulationInterval = null;
+let initialTemperatures = {};
+let defaultWindSpeed = "MEDIUM";
+
 async function fetchJSON(url, options) {
     const res = await fetch(url, options);
     if (!res.ok) {
@@ -30,10 +39,10 @@ async function loadRooms() {
             <td>${r.room_id}</td>
             <td>${stateBadge(r.state)}</td>
             <td>${r.current_temp} ℃</td>
+            <td>${r.target_temp} ℃</td>
             <td>${r.mode}</td>
             <td>${r.fan_speed}</td>
             <td>${r.cost.toFixed(2)}</td>
-            <td>-</td>
         `;
         tbody.appendChild(tr);
     });
@@ -452,6 +461,256 @@ function stopAutoRefresh() {
     }
 }
 
+// 加载测试用例
+async function applyInitialSettings() {
+    // 应用初始温度设置到房间
+    for (const [roomId, temp] of Object.entries(initialTemperatures)) {
+        console.log(`设置${roomId}初始温度为${temp}°C`);
+        try {
+            // 从房间ID字符串中提取数字（如从R1提取1）
+            const roomNum = parseInt(roomId.substring(1));
+            
+            // 调用初始化房间温度的API
+            const response = await fetch('/api/rooms/initialize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    room_id: roomNum,
+                    initial_temp: temp
+                })
+            });
+            
+            const result = await response.json();
+            if (result.error) {
+                console.error(`设置${roomId}初始温度失败:`, result.error);
+            } else {
+                console.log(`成功设置${roomId}初始温度为${temp}°C`);
+            }
+        } catch (error) {
+            console.error(`设置${roomId}初始温度时发生错误:`, error);
+        }
+    }
+    
+    console.log(`默认风速设置为${defaultWindSpeed}`);
+    // 默认风速将在房间开机时自动应用
+}
+
+async function loadTestCases() {
+    const loadBtn = document.getElementById('load-test-btn');
+    const startBtn = document.getElementById('start-test-btn');
+    
+    try {
+        // 禁用按钮防止重复点击
+        if (loadBtn) loadBtn.disabled = true;
+        if (loadBtn) loadBtn.textContent = '加载中...';
+        
+        const response = await fetchJSON('/api/test/load');
+        
+        if (response.success) {
+            alert(response.message);
+            totalTestMinutes = response.total_minutes;
+            currentTestMinute = 0;
+            
+            // 保存初始温度和默认风速设置
+            if (response.initial_temperatures) {
+                initialTemperatures = response.initial_temperatures;
+                console.log('初始温度设置:', initialTemperatures);
+            }
+            if (response.default_wind_speed) {
+                defaultWindSpeed = response.default_wind_speed;
+                console.log('默认风速设置:', defaultWindSpeed);
+            }
+            
+            // 启用开始按钮
+            if (startBtn) startBtn.disabled = false;
+            
+            // 根据初始温度设置房间状态
+            applyInitialSettings();
+        } else {
+            alert(response.message);
+        }
+    } catch (error) {
+        alert('加载测试用例失败: ' + error.message);
+    } finally {
+        // 恢复按钮状态
+        if (loadBtn) {
+            loadBtn.disabled = false;
+            loadBtn.textContent = '加载测试用例';
+        }
+    }
+}
+
+// 执行房间操作
+async function executeRoomOperation(operation) {
+    const roomId = operation.room_id;
+    const numericRoomId = roomId.substring(1); // 从R1提取1
+    
+    try {
+        switch (operation.type) {
+            case 'power_on':
+                // 不传递current_temp参数，让后端使用房间的实际温度
+                // 初始温度只在测试开始时通过applyInitialSettings函数设置
+                await fetchJSON(`/api/rooms/${numericRoomId}/power_on`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                console.log(`房间${roomId}开机成功，使用当前实际温度`);
+                break;
+            case 'power_off':
+                await fetchJSON(`/api/rooms/${numericRoomId}/power_off`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                console.log(`房间${roomId}关机成功`);
+                break;
+            case 'adjust_temperature':
+                await fetchJSON(`/api/rooms/${numericRoomId}/adjust_temperature`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_temp: operation.target_temp })
+                });
+                console.log(`房间${roomId}调温至${operation.target_temp}℃成功`);
+                break;
+            case 'adjust_wind_speed':
+                // 使用字符串拼接代替模板字符串，避免可能的解析问题
+                await fetchJSON('/api/rooms/' + numericRoomId + '/adjust_speed', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ speed: operation.speed })
+                });
+                console.log('房间' + roomId + '调风速至' + operation.speed + '成功');
+                break;
+        }
+    } catch (error) {
+        console.error(`执行房间${roomId}的${operation.type}操作失败:`, error);
+    }
+}
+
+// 10秒动态模拟60秒
+async function simulateMinute() {
+    // 10秒动态模拟1分钟（分10次，每次6秒）
+    const totalSeconds = 60; // 总共要模拟的秒数
+    const steps = 10; // 分10步完成
+    const secondsPerStep = totalSeconds / steps; // 每步6秒
+    const delayBetweenSteps = 1000; // 每步间隔1秒（总共10秒）
+    
+    for (let i = 0; i < steps && !testPaused; i++) {
+        // 模拟当前步骤的时间
+        await fetchJSON("/api/tick", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({seconds: secondsPerStep})
+        });
+        
+        // 更新UI显示最新状态
+        await loadRooms();
+        await loadQueues(); // 更新队列信息
+        
+        // 如果暂停了，跳出循环
+        if (testPaused) break;
+        
+        // 如果不是最后一步，等待1秒
+        if (i < steps - 1) {
+            await new Promise(resolve => {
+                const timeoutId = setTimeout(resolve, delayBetweenSteps);
+                // 支持暂停的检查
+                if (testPaused) clearTimeout(timeoutId);
+            });
+        }
+    }
+}
+
+// 开始测试用例执行
+async function startTest() {
+    const startBtn = document.getElementById('start-test-btn');
+    const loadBtn = document.getElementById('load-test-btn');
+    const tickBtn = document.getElementById('tick-btn');
+    
+    try {
+        // 禁用相关按钮
+        if (startBtn) startBtn.disabled = true;
+        if (loadBtn) loadBtn.disabled = true;
+        if (tickBtn) tickBtn.disabled = true;
+        
+        testRunning = true;
+        testPaused = false;
+        
+        console.log('开始测试，初始设置已加载:');
+        console.log('- 初始温度:', initialTemperatures);
+        console.log('- 默认风速:', defaultWindSpeed);
+        
+        while (testRunning && currentTestMinute < totalTestMinutes && !testPaused) {
+            // 开始执行当前时刻的操作
+            const response = await fetchJSON('/api/test/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (!response.success) {
+                alert(response.message);
+                break;
+            }
+            
+            // 更新初始设置（如果服务器返回新的设置）
+            if (response.initial_temperatures) {
+                initialTemperatures = response.initial_temperatures;
+            }
+            if (response.default_wind_speed) {
+                defaultWindSpeed = response.default_wind_speed;
+            }
+            
+            console.log(`执行时刻${currentTestMinute}的操作`);
+            
+            // 执行当前时刻的所有操作
+            for (const operation of response.operations) {
+                await executeRoomOperation(operation);
+                // 短暂延迟，确保操作顺序执行
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            // 更新UI
+            await loadRooms();
+            await loadQueues();
+            
+            // 动态模拟60秒（10秒实际时间）
+            await simulateMinute();
+            
+            if (testPaused) break;
+            
+            // 前进到下一个时刻
+            const nextResponse = await fetchJSON('/api/test/next', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (nextResponse.success) {
+                currentTestMinute = nextResponse.current_minute;
+                
+                if (!nextResponse.has_next) {
+                    alert('所有测试用例执行完毕');
+                    testRunning = false;
+                    break;
+                }
+            } else {
+                alert(nextResponse.message);
+                break;
+            }
+        }
+    } catch (error) {
+        alert('测试执行失败: ' + error.message);
+    } finally {
+        // 恢复按钮状态
+        if (!testPaused) {
+            testRunning = false;
+            if (startBtn) startBtn.disabled = false;
+            if (loadBtn) loadBtn.disabled = false;
+            if (tickBtn) tickBtn.disabled = false;
+        }
+    }
+}
+
 async function init() {
     // 导航切换
     const navAdmin = document.getElementById("nav-admin");
@@ -476,13 +735,41 @@ async function init() {
     const tickBtn = document.getElementById("tick-btn");
     if (tickBtn) {
         tickBtn.onclick = async () => {
-            await fetchJSON("/api/tick", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({seconds: 60})
-            });
-            await loadRooms();
-            await loadQueues(); // 更新队列信息
+            // 禁用按钮防止重复点击
+            tickBtn.disabled = true;
+            tickBtn.textContent = "模拟中...";
+            
+            // 10秒动态模拟1分钟（分10次，每次6秒）
+            const totalSeconds = 60; // 总共要模拟的秒数
+            const steps = 10; // 分10步完成
+            const secondsPerStep = totalSeconds / steps; // 每步6秒
+            const delayBetweenSteps = 1000; // 每步间隔1秒（总共10秒）
+            
+            for (let i = 0; i < steps; i++) {
+                // 模拟当前步骤的时间
+                await fetchJSON("/api/tick", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({seconds: secondsPerStep})
+                });
+                
+                // 更新UI显示最新状态
+                await loadRooms();
+                await loadQueues(); // 更新队列信息
+                
+                // 更新按钮进度显示
+                const progress = Math.round((i + 1) / steps * 100);
+                tickBtn.textContent = `模拟中... ${progress}%`;
+                
+                // 如果不是最后一步，等待1秒
+                if (i < steps - 1) {
+                    await new Promise(resolve => setTimeout(resolve, delayBetweenSteps));
+                }
+            }
+            
+            // 恢复按钮状态
+            tickBtn.disabled = false;
+            tickBtn.textContent = "模拟前进 1 分钟（10秒动态模拟）";
         };
     }
 
@@ -490,11 +777,33 @@ async function init() {
     initFrontdeskView();
     initManagerView();
     
+    // 测试用例相关按钮事件
+    const loadTestBtn = document.getElementById('load-test-btn');
+    const startTestBtn = document.getElementById('start-test-btn');
+    
+    if (loadTestBtn) {
+        loadTestBtn.onclick = loadTestCases;
+    }
+    
+    if (startTestBtn) {
+        startTestBtn.disabled = true; // 初始禁用，加载测试用例后启用
+        startTestBtn.onclick = startTest;
+    }
+    
     // 启动自动刷新
     startAutoRefresh();
     
     // 页面卸载时清理定时器
     window.addEventListener('beforeunload', stopAutoRefresh);
+    
+    // 清理测试相关的定时器
+    window.addEventListener('beforeunload', () => {
+        testRunning = false;
+        testPaused = false;
+        if (testSimulationInterval) {
+            clearInterval(testSimulationInterval);
+        }
+    });
 }
 
 window.addEventListener("load", init);

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Dict, Optional, List, Tuple
 
-from .models import RoomRepository, Mode, FanSpeed, PowerState
+from .models import RoomRepository, Mode, FanSpeed, PowerState, Room
 from .queues import ServedQueue, WaitingQueue
 from .timers import ServiceTimer, WaitTimer
 from .server import Server
@@ -455,6 +455,9 @@ class Scheduler:
                     self.served_queue.pop(room_id)
                     # 从服务计时器中移除房间，确保不再计时
                     self.service_timer.remove_timer(room_id)
+                # 确保已暂停的房间不在等待队列中
+                if after_state == PowerState.PAUSED and room_id in self.waiting_queue.all_rooms():
+                    self.waiting_queue.pop(room_id)
                 # 为状态变化的房间设置详单记录结束时间
                 record_id = self.current_record_ids.get(room_id)
                 if record_id is not None:
@@ -468,14 +471,63 @@ class Scheduler:
                         )
                     # 从当前记录ID字典中移除
                     self.current_record_ids.pop(room_id, None)
-                    
-        # 重要：当服务队列因状态变化出现空位时，不自动从等待队列调度房间
-        # 等待队列中的房间应通过power_on方法或时间片调度逻辑进入服务队列
-        # 这样可以避免在状态变化时错误地将等待队列中的房间移至服务队列
         
+        # 当服务队列因状态变化出现空位时，从等待队列调度优先级最高的房间补充
+        self._fill_served_queue_from_waiting()
+                    
         # 仅执行时间片调度，处理等待超时的同风速请求
         # 时间片调度逻辑会根据预设条件决定是否进行替换
         self._time_slice_schedule()
+        
+    def _fill_served_queue_from_waiting(self) -> None:
+        """
+        当服务队列未满时，从等待队列中选取优先级最高的房间补充到服务队列
+        """
+        # 检查服务队列是否有空位
+        if len(self.served_queue.all_rooms()) >= self.served_queue.capacity:
+            return
+        
+        # 检查等待队列是否有房间
+        waiting_rooms = self.waiting_queue.all_rooms()
+        if not waiting_rooms:
+            return
+        
+        # 从等待队列中选取优先级最高的房间（使用已设置的排序回调）
+        # 由于等待队列已经按优先级排序，直接取第一个
+        selected = waiting_rooms[0]
+        
+        # 将选中的房间从等待队列移除并添加到服务队列
+        self.waiting_queue.pop(selected)
+        self.served_queue.push(selected)
+        
+        # 更新房间状态为SERVING
+        room = self.rooms.get(selected)
+        if room is None:
+            return
+            
+        room.state = PowerState.SERVING
+        
+        # 重置服务计时器
+        self.service_timer.reset_timer(selected)
+        
+        # 移除等待计时器，避免等待时间继续递增
+        self.wait_timer._waiting_seconds.pop(selected, None)
+        
+        try:
+            # 创建新的详单记录
+            record_id = self.detail_record.create_record(
+                room_id=selected,
+                start_time=self._now_str(),
+                mode=room.mode.value,
+                target_temp=room.target_temp,
+                fan_speed=room.fan_speed.name,
+                fee_rate=self.server._calc_fee_rate(room.fan_speed),
+                operation_type="QUEUE_FILL",
+            )
+            self.current_record_ids[selected] = record_id
+        except Exception as e:
+            # 错误处理，确保即使创建记录失败也不会中断流程
+            print(f"Error creating record for room {selected}: {e}")
 
     def _on_room_state_changed(self, room_id: int, new_state: PowerState) -> None:
         """
@@ -483,12 +535,23 @@ class Scheduler:
         """
         room = self.rooms.get(room_id)
         
+        # 获取当前房间状态作为旧状态
+        old_state = room.state
+        
+        # 在更新房间状态之前，先处理所有依赖于旧状态的操作
+        state_changed = False
+        
         # 如果房间从SERVING变为PAUSED或OFF，需要立即从服务队列中移除
-        if room.state == PowerState.SERVING and new_state in [PowerState.PAUSED, PowerState.OFF]:
+        if old_state == PowerState.SERVING and new_state in [PowerState.PAUSED, PowerState.OFF]:
+            state_changed = True
             if room_id in self.served_queue.all_rooms():
                 self.served_queue.pop(room_id)
                 # 从服务计时器中移除房间，确保不再计时
                 self.service_timer.remove_timer(room_id)
+            
+            # 确保已暂停的房间不在等待队列中
+            if new_state == PowerState.PAUSED and room_id in self.waiting_queue.all_rooms():
+                self.waiting_queue.pop(room_id)
             
             # 为状态变化的房间设置详单记录结束时间
             record_id = self.current_record_ids.get(room_id)
@@ -507,8 +570,11 @@ class Scheduler:
         # 更新房间状态
         room.state = new_state
 
-        # 重新排序服务队列，确保服务时间变化能影响排序顺序
-        self.served_queue._sort_rooms()
+        # 只有在状态变化时才重新排序服务队列
+        if state_changed:
+            self.served_queue._sort_rooms()
+            # 当服务队列因状态变化出现空位时，从等待队列调度优先级最高的房间补充
+            self._fill_served_queue_from_waiting()
         
         # 注意：在_on_room_state_changed中不应该自动调度等待队列中的房间
         # 调度逻辑应该在power_on方法中根据优先级规则处理，或者在tick方法中定期执行

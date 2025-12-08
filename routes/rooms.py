@@ -14,7 +14,14 @@ def get_rooms():
 def power_on(room_id: int):
     """房间开机"""
     data = request.get_json(silent=True) or {}
-    current_temp = float(data.get('current_temp', 25.0))
+    # 检查房间是否存在，如果存在则使用房间当前的实际温度，而不是默认值
+    room = system.scheduler.rooms.get(room_id)
+    if room is not None:
+        # 如果房间已存在且有当前温度，则使用它
+        current_temp = room.current_temp
+    else:
+        # 如果房间不存在，则使用请求中的温度或默认值
+        current_temp = float(data.get('current_temp', 25.0))
     mode_str = data.get('mode', 'COOL').upper()
     
     # 确保mode_str不为空，为空时使用默认值COOL

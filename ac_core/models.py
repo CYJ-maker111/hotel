@@ -53,23 +53,14 @@ class RoomRepository:
     """
 
     def __init__(self, room_count: int):
-        # 为每个房间设置不同的初始气温
-        room_temperatures = {
-            1: 32.0,
-            2: 28.0,
-            3: 30.0,
-            4: 29.0,
-            5: 35.0
-        }
-        
+        # 不设置固定的初始温度，使用默认温度
+        # 测试用例的初始温度将通过/api/rooms/initialize接口设置
         self.rooms: Dict[int, Room] = {}
         for i in range(1, room_count + 1):
-            # 使用房间特定的初始温度，如果没有配置则使用默认值
-            initial_temp = room_temperatures.get(i, DEFAULT_TEMP)
             self.rooms[i] = Room(
                 room_id=i,
-                initial_temp=initial_temp,
-                current_temp=initial_temp  # 初始时当前温度等于初始温度
+                initial_temp=DEFAULT_TEMP,
+                current_temp=DEFAULT_TEMP  # 初始时使用默认温度
             )
 
     def get(self, room_id: int) -> Room:

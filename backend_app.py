@@ -1,6 +1,6 @@
 from flask import Flask, send_from_directory
 import os
-
+from routes.test import test_bp
 # 初始化Flask应用
 app = Flask(__name__, static_folder="frontend", static_url_path="/")
 
@@ -34,6 +34,7 @@ app.register_blueprint(queues_bp)
 app.register_blueprint(time_bp)
 app.register_blueprint(bills_bp)
 app.register_blueprint(db_manager_bp)
+app.register_blueprint(test_bp)
 
 
 if __name__ == "__main__":
