@@ -23,7 +23,7 @@ current_minute = test_state.current_step
 test_lock = test_state.lock
 
 # 测试用例文件路径
-TEST_FILE_PATH = r'c:\Users\LJM\Desktop\test\hotel\test.txt'
+TEST_FILE_PATH = r'./test.txt'
 
 @test_bp.route('/api/test/load', methods=['GET'])
 def load_test_cases():
@@ -127,6 +127,7 @@ def load_test_cases():
         
         # 重置当前时刻
         current_minute = 0
+        test_state.current_step = 0  # 同步重置test_state
         
         return jsonify({
             'success': True,
@@ -192,6 +193,7 @@ def next_minute():
         
         # 前进到下一个时刻
         current_minute += 1
+        test_state.current_step = current_minute  # 同步更新test_state
         
         # 检查是否还有下一个时刻
         if current_minute >= len(test_cases):
@@ -203,15 +205,13 @@ def next_minute():
                 'has_next': False
             })
         
-        # 返回下一个时刻的信息
-        next_case = test_cases[current_minute]
+        # 返回下一个时刻的信息（但不执行操作，由前端调用start来执行）
         return jsonify({
             'success': True,
-            'message': f'准备执行时刻{current_minute}的操作',
+            'message': f'已前进到时刻{current_minute}',
             'current_minute': current_minute,
             'total_minutes': len(test_cases),
-            'has_next': True,
-            'operations': next_case['operations']
+            'has_next': True
         })
 
 @test_bp.route('/api/test/status', methods=['GET'])

@@ -33,6 +33,8 @@ class Scheduler:
         self.time_slice = time_slice_seconds
         # 记录当前正在服务的详单记录 id：room_id -> detail_record_id
         self.current_record_ids: Dict[int, int] = {}
+        # 累计秒数，用于每分钟结束时进行温度四舍五入
+        self._accumulated_seconds = 0
         
         # 设置队列的排序回调函数
         self.served_queue.set_sort_callback(lambda rid: (
@@ -440,6 +442,30 @@ class Scheduler:
                                 record_id,
                                 cost=new_cost,
                             )
+        
+        # 累计秒数加1
+        self._accumulated_seconds += 1
+        
+        # 每到60秒（1分钟）结束时，对所有房间的温度和费用进行四舍五入
+        if self._accumulated_seconds >= 60:
+            self._accumulated_seconds = 0
+            for room_id in self.rooms.rooms.keys():
+                room = self.rooms.get(room_id)
+                # 温度四舍五入到小数点后一位
+                room.current_temp = round(room.current_temp, 1)
+                # 费用四舍五入到小数点后两位（费用通常保留两位小数）
+                room.cost = round(room.cost, 2)
+                
+                # 同时更新详单记录中的费用
+                record_id = self.current_record_ids.get(room_id)
+                if record_id is not None:
+                    current_record = self.detail_record.get_record(record_id)
+                    if current_record:
+                        # 使用四舍五入后的费用更新记录
+                        self.detail_record.update_on_service(
+                            record_id,
+                            cost=room.cost,
+                        )
 
         # 检查是否有服务对象的目标温度到达或关机（状态变化）
         after_states = {rid: room.state for rid, room in self.rooms.rooms.items()}

@@ -96,7 +96,12 @@
                 <div style="display: flex; gap: 8px; margin-top:8px;">
                     <button id="tick-btn" class="primary">模拟前进 1 分钟（10秒动态模拟）</button>
                     <button id="load-test-btn" class="primary">加载测试用例</button>
-                    <button id="start-test-btn" class="primary">开始</button>
+                    <button id="auto-test-btn" class="primary">一键执行</button>
+                    <button id="start-test-btn" class="primary">执行当前时刻</button>
+                    <button id="next-step-btn" class="primary" style="display:none;">下一步</button>
+                </div>
+                <div id="test-status" style="margin-top:8px; font-size:13px; color:#666;">
+                    <span class="muted">请先加载测试用例</span>
                 </div>
             </div>
         </div>

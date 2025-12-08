@@ -523,8 +523,16 @@ async function loadTestCases() {
                 console.log('默认风速设置:', defaultWindSpeed);
             }
             
-            // 启用开始按钮
+            // 启用开始按钮和一键执行按钮
             if (startBtn) startBtn.disabled = false;
+            const autoBtn = document.getElementById('auto-test-btn');
+            if (autoBtn) autoBtn.disabled = false;
+            
+            // 重置当前时刻为0
+            currentTestMinute = 0;
+            
+            // 更新测试状态显示
+            updateTestStatus();
             
             // 根据初始温度设置房间状态
             applyInitialSettings();
@@ -622,22 +630,163 @@ async function simulateMinute() {
     }
 }
 
-// 开始测试用例执行
-async function startTest() {
+// 执行当前时刻的测试用例
+async function executeCurrentStep() {
     const startBtn = document.getElementById('start-test-btn');
+    const nextBtn = document.getElementById('next-step-btn');
     const loadBtn = document.getElementById('load-test-btn');
     const tickBtn = document.getElementById('tick-btn');
+    const statusDiv = document.getElementById('test-status');
     
     try {
         // 禁用相关按钮
         if (startBtn) startBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
+        if (loadBtn) loadBtn.disabled = true;
+        if (tickBtn) tickBtn.disabled = true;
+        
+        // 检查是否有测试用例
+        if (totalTestMinutes === 0) {
+            alert('请先加载测试用例');
+            return;
+        }
+        
+        // 检查是否已经执行完所有时刻
+        if (currentTestMinute >= totalTestMinutes) {
+            alert('所有测试用例已执行完毕');
+            updateTestStatus();
+            return;
+        }
+        
+        // 开始执行当前时刻的操作
+        const response = await fetchJSON('/api/test/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.success) {
+            alert(response.message);
+            return;
+        }
+        
+        // 更新初始设置（如果服务器返回新的设置）
+        if (response.initial_temperatures) {
+            initialTemperatures = response.initial_temperatures;
+        }
+        if (response.default_wind_speed) {
+            defaultWindSpeed = response.default_wind_speed;
+        }
+        
+        console.log(`执行时刻${currentTestMinute}的操作`);
+        
+        // 更新状态显示
+        if (statusDiv) {
+            statusDiv.innerHTML = `<span style="color:#2196F3;">正在执行时刻 ${currentTestMinute} 的操作...</span>`;
+        }
+        
+        // 执行当前时刻的所有操作
+        for (const operation of response.operations) {
+            await executeRoomOperation(operation);
+            // 短暂延迟，确保操作顺序执行
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        // 更新UI
+        await loadRooms();
+        await loadQueues();
+        
+        // 动态模拟60秒（10秒实际时间）
+        if (statusDiv) {
+            statusDiv.innerHTML = `<span style="color:#2196F3;">正在模拟时间前进1分钟...</span>`;
+        }
+        await simulateMinute();
+        
+        // 前进到下一个时刻
+        const nextResponse = await fetchJSON('/api/test/next', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (nextResponse.success) {
+            currentTestMinute = nextResponse.current_minute;
+            
+            // 更新状态显示
+            updateTestStatus();
+            
+            if (!nextResponse.has_next) {
+                alert('所有测试用例执行完毕');
+                if (startBtn) startBtn.disabled = true;
+                if (nextBtn) nextBtn.style.display = 'none';
+            } else {
+                // 启用下一步按钮
+                if (nextBtn) {
+                    nextBtn.style.display = 'inline-block';
+                    nextBtn.disabled = false;
+                }
+            }
+        } else {
+            alert(nextResponse.message);
+        }
+    } catch (error) {
+        alert('测试执行失败: ' + error.message);
+        console.error('测试执行错误:', error);
+    } finally {
+        // 恢复按钮状态
+        if (startBtn) startBtn.disabled = false;
+        if (loadBtn) loadBtn.disabled = false;
+        if (tickBtn) tickBtn.disabled = false;
+    }
+}
+
+// 更新测试状态显示
+function updateTestStatus() {
+    const statusDiv = document.getElementById('test-status');
+    if (statusDiv) {
+        if (totalTestMinutes === 0) {
+            statusDiv.innerHTML = '<span class="muted">请先加载测试用例</span>';
+        } else if (currentTestMinute >= totalTestMinutes) {
+            statusDiv.innerHTML = '<span style="color:#4CAF50;">✓ 所有测试用例已执行完毕</span>';
+        } else {
+            statusDiv.innerHTML = `<span>当前时刻: ${currentTestMinute} / ${totalTestMinutes - 1}</span>`;
+        }
+    }
+}
+
+// 下一步操作
+async function nextStep() {
+    await executeCurrentStep();
+}
+
+// 一键执行所有测试用例（自动执行）
+async function startAutoTest() {
+    const autoBtn = document.getElementById('auto-test-btn');
+    const startBtn = document.getElementById('start-test-btn');
+    const nextBtn = document.getElementById('next-step-btn');
+    const loadBtn = document.getElementById('load-test-btn');
+    const tickBtn = document.getElementById('tick-btn');
+    const statusDiv = document.getElementById('test-status');
+    
+    try {
+        // 禁用相关按钮
+        if (autoBtn) autoBtn.disabled = true;
+        if (startBtn) startBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
         if (loadBtn) loadBtn.disabled = true;
         if (tickBtn) tickBtn.disabled = true;
         
         testRunning = true;
         testPaused = false;
         
-        console.log('开始测试，初始设置已加载:');
+        // 检查是否有测试用例
+        if (totalTestMinutes === 0) {
+            alert('请先加载测试用例');
+            return;
+        }
+        
+        // 重置当前时刻为0
+        currentTestMinute = 0;
+        
+        console.log('开始一键执行测试，初始设置已加载:');
         console.log('- 初始温度:', initialTemperatures);
         console.log('- 默认风速:', defaultWindSpeed);
         
@@ -663,6 +812,11 @@ async function startTest() {
             
             console.log(`执行时刻${currentTestMinute}的操作`);
             
+            // 更新状态显示
+            if (statusDiv) {
+                statusDiv.innerHTML = `<span style="color:#2196F3;">正在执行时刻 ${currentTestMinute} / ${totalTestMinutes - 1}...</span>`;
+            }
+            
             // 执行当前时刻的所有操作
             for (const operation of response.operations) {
                 await executeRoomOperation(operation);
@@ -675,6 +829,9 @@ async function startTest() {
             await loadQueues();
             
             // 动态模拟60秒（10秒实际时间）
+            if (statusDiv) {
+                statusDiv.innerHTML = `<span style="color:#2196F3;">正在模拟时间前进1分钟... (${currentTestMinute + 1}/${totalTestMinutes})</span>`;
+            }
             await simulateMinute();
             
             if (testPaused) break;
@@ -689,6 +846,9 @@ async function startTest() {
                 currentTestMinute = nextResponse.current_minute;
                 
                 if (!nextResponse.has_next) {
+                    if (statusDiv) {
+                        statusDiv.innerHTML = '<span style="color:#4CAF50;">✓ 所有测试用例执行完毕</span>';
+                    }
                     alert('所有测试用例执行完毕');
                     testRunning = false;
                     break;
@@ -700,14 +860,18 @@ async function startTest() {
         }
     } catch (error) {
         alert('测试执行失败: ' + error.message);
+        console.error('测试执行错误:', error);
     } finally {
         // 恢复按钮状态
         if (!testPaused) {
             testRunning = false;
+            if (autoBtn) autoBtn.disabled = false;
             if (startBtn) startBtn.disabled = false;
             if (loadBtn) loadBtn.disabled = false;
             if (tickBtn) tickBtn.disabled = false;
         }
+        // 更新测试状态显示
+        updateTestStatus();
     }
 }
 
@@ -779,16 +943,30 @@ async function init() {
     
     // 测试用例相关按钮事件
     const loadTestBtn = document.getElementById('load-test-btn');
+    const autoTestBtn = document.getElementById('auto-test-btn');
     const startTestBtn = document.getElementById('start-test-btn');
+    const nextStepBtn = document.getElementById('next-step-btn');
     
     if (loadTestBtn) {
         loadTestBtn.onclick = loadTestCases;
     }
     
+    if (autoTestBtn) {
+        autoTestBtn.disabled = true; // 初始禁用，加载测试用例后启用
+        autoTestBtn.onclick = startAutoTest;
+    }
+    
     if (startTestBtn) {
         startTestBtn.disabled = true; // 初始禁用，加载测试用例后启用
-        startTestBtn.onclick = startTest;
+        startTestBtn.onclick = executeCurrentStep;
     }
+    
+    if (nextStepBtn) {
+        nextStepBtn.onclick = nextStep;
+    }
+    
+    // 初始化测试状态显示
+    updateTestStatus();
     
     // 启动自动刷新
     startAutoRefresh();
