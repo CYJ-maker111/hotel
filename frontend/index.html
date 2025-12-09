@@ -77,6 +77,7 @@
                     </div>
                     <div style="align-self:flex-end;">
                         <button id="admin-view-detail" class="primary">查看详单</button>
+                        <button id="admin-reset-cost" class="danger" style="margin-left:4px;">重置累计费用</button>
                     </div>
                 </div>
                 <hr>
@@ -178,13 +179,13 @@
                     <table id="detail-table" style="width:100%; border-collapse: collapse; font-size:12px;">
                         <thead>
                             <tr>
+                                <th>请求时间</th>
                                 <th>开始时间</th>
                                 <th>结束时间</th>
-                                <th>模式</th>
-                                <th>温度</th>
+                                <th>时长(秒)</th>
                                 <th>风速</th>
-                                <th>费用(元)</th>
-                                <th>操作</th>
+                                <th>当前费用</th>
+                                <th>累积费用</th>
                             </tr>
                         </thead>
                         <tbody></tbody>

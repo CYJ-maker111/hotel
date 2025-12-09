@@ -24,8 +24,8 @@ test_lock = test_state.lock
 
 # 测试用例文件路径配置
 TEST_FILES = {
-    'cooling': r'c:\\Users\\LJM\\Desktop\\ac_system\\hotel\\制冷.txt',
-    'heating': r'c:\\Users\\LJM\\Desktop\\ac_system\\hotel\\制热.txt',
+    'cooling': r'hotel/制冷.txt',
+    'heating': r'hotel/制热.txt',
     'default': r'./test.txt'
 }
 
@@ -108,7 +108,8 @@ def load_test_cases():
                         # 解析调温操作
                         elif '调温' in op:
                             room_id = op[:2]  # 提取R1-R5
-                            temp_match = re.search(r'调温(\d+)℃?', op)
+                            # 支持"调温25℃"、"调温25"、"调温为25℃"等格式
+                            temp_match = re.search(r'调温为?(\d+)℃?', op)
                             if temp_match:
                                 temp = int(temp_match.group(1))
                                 operations.append({
@@ -119,11 +120,16 @@ def load_test_cases():
                         # 解析调风速操作
                         elif '调风速' in op:
                             room_id = op[:2]  # 提取R1-R5
-                            speed_match = re.search(r'调风速为?(HIGH|MEDIUM|LOW|高|中|低)', op)
+                            speed_match = re.search(r'调风速为?(HIGH|MEDIUM|MID|LOW|高|中|低)', op)
                             if speed_match:
                                 speed = speed_match.group(1)
-                                # 转换中文风速为英文
-                                speed_map = {'高': 'HIGH', '中': 'MEDIUM', '低': 'LOW'}
+                                # 转换中文风速和简写为英文标准格式
+                                speed_map = {
+                                    '高': 'HIGH', 
+                                    '中': 'MEDIUM', 
+                                    '低': 'LOW',
+                                    'MID': 'MEDIUM'  # MID 映射到 MEDIUM
+                                }
                                 if speed in speed_map:
                                     speed = speed_map[speed]
                                 operations.append({

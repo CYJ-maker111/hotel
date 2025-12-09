@@ -234,15 +234,18 @@ class Scheduler:
         
         # PAUSED 状态：暂停时也允许修改风速
         if room.state == PowerState.PAUSED:
-            # 创建一条新的详单记录，记录风速变化事件
+            # 更新服务器端的风速
+            fee_rate = self.server.update_speed(room_id, new_speed)
+            
+            # 创建一条新的详单记录，记录风速变化事件（但不计费，因为暂停状态）
             self.detail_record.create_record(
                 room_id=room_id,
                 start_time=self._now_str(),
                 mode=room.mode.value,
                 target_temp=room.target_temp,
                 fan_speed=new_speed.name,
-                fee_rate=self.server._calc_fee_rate(new_speed),
-                operation_type="SPEED_CHANGE",
+                fee_rate=fee_rate,
+                operation_type="SPEED_CHANGE_PAUSED",
             )
             return {"ok": "SOk"}
         
@@ -258,18 +261,7 @@ class Scheduler:
         """
         # 仅重新排序服务队列，确保风速提高的房间获得更高优先级
         self.served_queue._sort_rooms()
-        # 记录风速调整操作
-        room = self.rooms.get(room_id)
-        fee_rate = self.server._calc_fee_rate(room.fan_speed)
-        self.detail_record.create_record(
-            room_id=room_id,
-            start_time=self._now_str(),
-            mode=room.mode.value,
-            target_temp=room.target_temp,
-            fan_speed=room.fan_speed.name,
-            fee_rate=fee_rate,
-            operation_type="SPEED_ADJUST_PRIORITY",
-        )
+        # 不需要为优先级调度创建单独的记录，费用在原记录上继续累积
     
     def _check_waiting_queue_after_speed_decrease(self, room_id: int) -> None:
         """
@@ -356,48 +348,22 @@ class Scheduler:
         room = self.rooms.get(room_id)
         
         # SERVING 状态：服务中直接更新目标温度
+        # 注意：调温不应该创建新的计费记录，费用继续在当前记录上累积
         if self.served_queue.contains(room_id):
             self.server.update_target_temperature(room_id, new_target_temp)
-            # 创建一条新的详单记录，记录温度变化事件
-            self.detail_record.create_record(
-                room_id=room_id,
-                start_time=self._now_str(),
-                mode=room.mode.value,
-                target_temp=new_target_temp,
-                fan_speed=room.fan_speed.name,
-                fee_rate=self.server._calc_fee_rate(room.fan_speed),
-                operation_type="TEMP_CHANGE",
-            )
+            # 只更新目标温度，不创建新记录，避免重复计费
             return {"ok": "SOk"}
         
         # WAITING 状态：等待队列中直接更新房间的目标温度
         if self.waiting_queue.contains(room_id):
             room.target_temp = new_target_temp
-            # 创建一条新的详单记录，记录温度变化事件
-            self.detail_record.create_record(
-                room_id=room_id,
-                start_time=self._now_str(),
-                mode=room.mode.value,
-                target_temp=new_target_temp,
-                fan_speed=room.fan_speed.name,
-                fee_rate=self.server._calc_fee_rate(room.fan_speed),
-                operation_type="TEMP_CHANGE",
-            )
+            # 只更新目标温度，不创建新记录
             return {"ok": "SOk"}
         
         # PAUSED 状态：暂停时也允许修改目标温度
         if room.state == PowerState.PAUSED:
             room.target_temp = new_target_temp
-            # 创建一条新的详单记录，记录温度变化事件
-            self.detail_record.create_record(
-                room_id=room_id,
-                start_time=self._now_str(),
-                mode=room.mode.value,
-                target_temp=new_target_temp,
-                fan_speed=room.fan_speed.name,
-                fee_rate=self.server._calc_fee_rate(room.fan_speed),
-                operation_type="TEMP_CHANGE",
-            )
+            # 只更新目标温度，不创建新记录
             return {"ok": "SOk"}
         
         # OFF 或其他状态：返回房间状态

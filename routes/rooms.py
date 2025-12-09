@@ -34,8 +34,33 @@ def power_on(room_id: int):
 
 @rooms_bp.route('/<int:room_id>/power_off', methods=['POST'])
 def power_off(room_id: int):
-    """房间关机"""
+    """房间关机，每次关机视为过了一天，增加关机次数"""
+    import sqlite3
+    import os
+    
     result = system.scheduler.power_off(room_id)
+    
+    # 如果关机成功，增加关机次数
+    if result.get('ok') or result.get('state') == 'off':
+        # 连接数据库
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'hotel_ac.db')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # 更新入住记录的关机次数
+            cursor.execute("""
+                UPDATE checkin_records 
+                SET power_off_count = power_off_count + 1
+                WHERE room_id = ? AND status = 'CHECKED_IN'
+            """, (room_id,))
+            conn.commit()
+        except Exception as e:
+            print(f"更新关机次数失败: {str(e)}")
+            conn.rollback()
+        finally:
+            conn.close()
+    
     return jsonify(result)
 
 @rooms_bp.route('/<int:room_id>/adjust_speed', methods=['POST'])

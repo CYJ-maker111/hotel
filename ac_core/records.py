@@ -23,13 +23,16 @@ class DetailRecord:
                 CREATE TABLE IF NOT EXISTS detail_records (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     room_id INTEGER NOT NULL,
+                    request_time TEXT,
                     start_time TEXT NOT NULL,
                     end_time TEXT,
+                    service_duration INTEGER DEFAULT 0,
                     mode TEXT NOT NULL,
                     target_temp REAL NOT NULL,
                     fan_speed TEXT NOT NULL,
                     fee_rate REAL NOT NULL,
                     cost REAL NOT NULL DEFAULT 0,
+                    accumulated_cost REAL DEFAULT 0,
                     operation_type TEXT NOT NULL
                 )
                 """
@@ -47,6 +50,7 @@ class DetailRecord:
         fan_speed: str,
         fee_rate: float,
         operation_type: str,
+        request_time: str = None,
     ) -> int:
         """
         创建一条新的详单记录，返回记录 ID。
@@ -54,14 +58,20 @@ class DetailRecord:
         conn = self._get_conn()
         try:
             cur = conn.cursor()
+            # 如果没有提供请求时间，使用开始时间
+            if request_time is None:
+                request_time = start_time
+            
+            # 创建新记录时，累积费用初始为0（稍后会通过update_on_service更新）
             cur.execute(
                 """
                 INSERT INTO detail_records
-                (room_id, start_time, mode, target_temp, fan_speed,
-                 fee_rate, operation_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (room_id, request_time, start_time, mode, target_temp, fan_speed,
+                 fee_rate, operation_type, cost, accumulated_cost)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
                 """,
-                (room_id, start_time, mode, target_temp, fan_speed, fee_rate, operation_type),
+                (room_id, request_time, start_time, mode, target_temp, fan_speed, 
+                 fee_rate, operation_type),
             )
             conn.commit()
             return cur.lastrowid
@@ -72,21 +82,40 @@ class DetailRecord:
         self, record_id: int, cost: float, end_time: Optional[str] = None
     ) -> None:
         """
-        更新记录的费用，可选结束时间。
+        更新记录的费用、服务时长和累积费用，可选结束时间。
         """
         conn = self._get_conn()
         try:
             cur = conn.cursor()
+            
+            # 获取记录的房间ID和开始时间
+            cur.execute("SELECT room_id, start_time FROM detail_records WHERE id = ?", (record_id,))
+            row = cur.fetchone()
+            if not row:
+                return
+            
+            room_id, start_time = row
+            
             if end_time:
+                # 计算服务时长（秒）
+                cur.execute(
+                    "SELECT (julianday(?) - julianday(?)) * 86400", 
+                    (end_time, start_time)
+                )
+                duration_row = cur.fetchone()
+                service_duration = int(duration_row[0]) if duration_row else 0
+                
+                # 更新当前记录
                 cur.execute(
                     """
                     UPDATE detail_records
-                    SET cost = ?, end_time = ?
+                    SET cost = ?, end_time = ?, service_duration = ?
                     WHERE id = ?
                     """,
-                    (cost, end_time, record_id),
+                    (cost, end_time, service_duration, record_id),
                 )
             else:
+                # 更新当前记录（无结束时间）
                 cur.execute(
                     """
                     UPDATE detail_records
@@ -95,6 +124,21 @@ class DetailRecord:
                     """,
                     (cost, record_id),
                 )
+            
+            # 计算并更新累积费用：该房间按ID顺序（即创建顺序）到当前记录为止的所有费用总和
+            cur.execute(
+                """
+                UPDATE detail_records
+                SET accumulated_cost = (
+                    SELECT SUM(d2.cost)
+                    FROM detail_records d2
+                    WHERE d2.room_id = detail_records.room_id
+                    AND d2.id <= detail_records.id
+                )
+                WHERE id = ?
+                """,
+                (record_id,)
+            )
             conn.commit()
         finally:
             conn.close()

@@ -63,6 +63,38 @@ async function loadAdminRoomSelect() {
 }
 
 // 管理员界面：查看房间详单
+async function adminResetRoomCost() {
+    const select = document.getElementById("admin-room-select");
+    const roomId = parseInt(select.value);
+    
+    if (!roomId) {
+        alert("请先选择房间");
+        return;
+    }
+    
+    if (!confirm(`确定要重置房间${roomId}的累计费用吗？\n这将清空该房间的所有详单记录！`)) {
+        return;
+    }
+    
+    try {
+        const result = await fetchJSON(`/api/bills/${roomId}/reset`, {
+            method: 'POST'
+        });
+        
+        if (result.status === 'success') {
+            alert(`${result.message}\n已删除 ${result.deleted_records} 条记录`);
+            // 刷新详单显示
+            await adminViewRoomDetail();
+            // 刷新房间列表
+            await loadRoomsStatus();
+        } else {
+            alert(`重置失败：${result.message}`);
+        }
+    } catch (error) {
+        alert(`重置失败：${error.message}`);
+    }
+}
+
 async function adminViewRoomDetail() {
     const select = document.getElementById("admin-room-select");
     const roomId = parseInt(select.value);
@@ -85,13 +117,13 @@ async function adminViewRoomDetail() {
                 <table style="width:100%; border-collapse: collapse; font-size:12px;">
                     <thead>
                         <tr>
+                            <th>请求时间</th>
                             <th>开始时间</th>
                             <th>结束时间</th>
-                            <th>模式</th>
-                            <th>目标温度</th>
+                            <th>时长(秒)</th>
                             <th>风速</th>
-                            <th>费用(元)</th>
-                            <th>操作类型</th>
+                            <th>当前费用</th>
+                            <th>累积费用</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -100,13 +132,13 @@ async function adminViewRoomDetail() {
             detail.records.forEach(record => {
                 html += `
                     <tr>
+                        <td>${record.request_time || '-'}</td>
                         <td>${record.start_time}</td>
                         <td>${record.end_time || '-'}</td>
-                        <td>${record.mode}</td>
-                        <td>${record.target_temp}°C</td>
+                        <td>${record.service_duration || 0}</td>
                         <td>${record.fan_speed}</td>
                         <td>${record.cost.toFixed(2)}</td>
-                        <td>${record.operation_type}</td>
+                        <td>${record.accumulated_cost.toFixed(2)}</td>
                     </tr>
                 `;
             });
@@ -271,13 +303,13 @@ async function viewRoomDetail() {
             detail.records.forEach(record => {
                 const tr = document.createElement("tr");
                 tr.innerHTML = `
+                    <td>${record.request_time || '-'}</td>
                     <td>${record.start_time}</td>
                     <td>${record.end_time || '-'}</td>
-                    <td>${record.mode}</td>
-                    <td>${record.target_temp}°C</td>
+                    <td>${record.service_duration || 0}</td>
                     <td>${record.fan_speed}</td>
                     <td>${record.cost.toFixed(2)}</td>
-                    <td>${record.operation_type}</td>
+                    <td>${record.accumulated_cost.toFixed(2)}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -300,25 +332,30 @@ async function loadCheckoutBill() {
         container.innerHTML = "<p class='muted'>请选择有效的房间号。</p>";
         return;
     }
-    const bill = await fetchJSON(`/api/rooms/${roomId}/bill`);
-    let html = `<p><b>房间：</b>${bill.room_id}</p>`;
-    html += `<p><b>总费用：</b>${bill.total_cost} 元</p>`;
-    html += "<table><tr><th>ID</th><th>开始时间</th><th>结束时间</th><th>模式</th><th>目标温度</th><th>风速</th><th>费率</th><th>费用</th><th>类型</th></tr>";
-    bill.details.forEach(d => {
-        html += `<tr>
-            <td>${d.id}</td>
-            <td>${d.start_time}</td>
-            <td>${d.end_time || ""}</td>
-            <td>${d.mode}</td>
-            <td>${d.target_temp}</td>
-            <td>${d.fan_speed}</td>
-            <td>${d.fee_rate}</td>
-            <td>${d.cost.toFixed(2)}</td>
-            <td>${d.operation_type}</td>
-        </tr>`;
-    });
-    html += "</table>";
-    container.innerHTML = html;
+    
+    try {
+        // 获取综合账单（包含住宿费和空调费）
+        const bill = await fetchJSON(`/api/bills/${roomId}/comprehensive`);
+        
+        let html = `
+            <div style="border: 1px solid #e5e7eb; padding: 16px; border-radius: 8px; background: #f9fafb;">
+                <h3 style="margin-top: 0;">综合账单</h3>
+                <table style="width: 100%; border: none;">
+                    <tr><td><b>房间号：</b></td><td>R${bill.room_id}</td></tr>
+                    <tr><td><b>客人姓名：</b></td><td>${bill.guest_name}</td></tr>
+                    <tr><td><b>入住时间：</b></td><td>${bill.checkin_time}</td></tr>
+                    <tr><td><b>离开时间：</b></td><td>${bill.checkout_time || '未退房'}</td></tr>
+                    <tr><td><b>关机次数：</b></td><td>${bill.power_off_count} 次</td></tr>
+                    <tr><td><b>住宿费用：</b></td><td>${bill.accommodation_cost.toFixed(2)} 元 (${bill.daily_rate}元/天 × ${bill.power_off_count}天)</td></tr>
+                    <tr><td><b>空调费用：</b></td><td>${bill.ac_total_cost.toFixed(2)} 元</td></tr>
+                    <tr style="border-top: 2px solid #374151;"><td><b>总计：</b></td><td style="font-size: 18px; color: #dc2626;"><b>${bill.total_cost.toFixed(2)} 元</b></td></tr>
+                </table>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (error) {
+        container.innerHTML = `<p style="color: #dc2626;">获取账单失败：${error.message}</p>`;
+    }
 }
 
 async function checkoutRoom() {
@@ -924,6 +961,12 @@ async function init() {
     const viewDetailBtn = document.getElementById("admin-view-detail");
     if (viewDetailBtn) {
         viewDetailBtn.onclick = () => adminViewRoomDetail();
+    }
+    
+    // 重置累计费用按钮
+    const resetCostBtn = document.getElementById("admin-reset-cost");
+    if (resetCostBtn) {
+        resetCostBtn.onclick = () => adminResetRoomCost();
     }
     
     // 模拟前进按钮
