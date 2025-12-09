@@ -60,7 +60,8 @@ class Server:
         """
         room = self.rooms.get(room_id)
         cost = 0.0
-        temp_change = 0.0
+        # 使用 Decimal 累计温差，避免 0.33 等分步导致的浮点误差
+        temp_change_dec = Decimal("0")
         # 每次计算前先规范化当前温度，减少累计误差
         room.current_temp = self._normalize_temp(room.current_temp)
         
@@ -73,7 +74,8 @@ class Server:
             else:
                 temp_rate_per_min = 1.0 / 3.0  # 低风：1℃/3分钟
 
-            temp_rate_per_sec = temp_rate_per_min / 60.0
+            temp_rate_per_sec_dec = Decimal(str(temp_rate_per_min)) / Decimal("60")
+            temp_rate_per_sec = float(temp_rate_per_sec_dec)
 
             # 温度对齐容差：如果温度与目标温度差值小于此值，立即对齐
             temp_tolerance = 0.005
@@ -94,14 +96,14 @@ class Server:
                     
                     if room.current_temp > room.target_temp:
                         # 如果当前温度大于目标温度，继续降温
-                        room.current_temp -= temp_rate_per_sec
-                        room.current_temp = self._normalize_temp(room.current_temp)
-                        temp_change += temp_rate_per_sec
+                        delta = min(temp_rate_per_sec, room.current_temp - room.target_temp)
+                        room.current_temp -= delta
+                        temp_change_dec += Decimal(str(delta))
                         
                         # 每次变化后立即检查是否达到目标温度
                         temp_diff = room.current_temp - room.target_temp
                         if abs(temp_diff) <= temp_tolerance or room.current_temp <= room.target_temp:
-                            room.current_temp = self._normalize_temp(room.target_temp)
+                            room.current_temp = room.target_temp
                             # 达到目标温度，更新房间状态为暂停服务（回温）状态
                             room.state = PowerState.PAUSED
                             # 通知调度器房间状态变化，需要从服务队列移除
@@ -122,13 +124,14 @@ class Server:
                         temp_rate_per_sec = temp_rate_per_min / 60.0
                         
                         for _ in range(delta_seconds):
-                            room.current_temp += temp_rate_per_sec
-                            room.current_temp = self._normalize_temp(room.current_temp)
+                            delta = min(temp_rate_per_sec, room.target_temp - room.current_temp)
+                            room.current_temp += delta
+                            temp_change_dec += Decimal(str(delta))
                             
                             # 每次变化后立即检查是否达到目标温度
                             temp_diff = room.current_temp - room.target_temp
                             if abs(temp_diff) <= temp_tolerance or room.current_temp >= room.target_temp:
-                                room.current_temp = self._normalize_temp(room.target_temp)
+                                room.current_temp = room.target_temp
                                 break
                         return 0.0  # 回温过程不计费
                 else:  # HEAT模式
@@ -146,14 +149,14 @@ class Server:
                     
                     if room.current_temp < room.target_temp:
                         # 如果当前温度小于目标温度，继续升温
-                        room.current_temp += temp_rate_per_sec
-                        room.current_temp = self._normalize_temp(room.current_temp)
-                        temp_change += temp_rate_per_sec
+                        delta = min(temp_rate_per_sec, room.target_temp - room.current_temp)
+                        room.current_temp += delta
+                        temp_change_dec += Decimal(str(delta))
                         
                         # 每次变化后立即检查是否达到目标温度
                         temp_diff = room.target_temp - room.current_temp
                         if abs(temp_diff) <= temp_tolerance or room.current_temp >= room.target_temp:
-                            room.current_temp = self._normalize_temp(room.target_temp)
+                            room.current_temp = room.target_temp
                             # 达到目标温度，更新房间状态为暂停服务（回温）状态
                             room.state = PowerState.PAUSED
                             # 通知调度器房间状态变化，需要从服务队列移除
@@ -174,18 +177,19 @@ class Server:
                         temp_rate_per_sec = temp_rate_per_min / 60.0
                         
                         for _ in range(delta_seconds):
-                            room.current_temp -= temp_rate_per_sec
-                            room.current_temp = self._normalize_temp(room.current_temp)
+                            delta = min(temp_rate_per_sec, room.current_temp - room.target_temp)
+                            room.current_temp -= delta
+                            temp_change_dec += Decimal(str(delta))
                             
                             # 每次变化后立即检查是否达到目标温度
                             temp_diff = room.target_temp - room.current_temp
                             if abs(temp_diff) <= temp_tolerance or room.current_temp <= room.target_temp:
-                                room.current_temp = self._normalize_temp(room.target_temp)
+                                room.current_temp = room.target_temp
                                 break
                         return 0.0  # 回温过程不计费
               
-            # 费用（元）= 温度变化量（℃）* 1元/1℃
-            cost = self._normalize_temp(temp_change, 3)  # 计费费率：1元/1℃，所以费用=温度变化量
+            # 费用（元）= 温度变化量（℃）* 1元/1℃，使用 Decimal 精确累计后再四舍五入到 3 位
+            cost = float(temp_change_dec.quantize(Decimal("0.000"), rounding=ROUND_HALF_UP))
             
         elif room.state == PowerState.PAUSED:
             # 情况2：房间达到目标温度后的回温算法：每分钟回温0.5℃

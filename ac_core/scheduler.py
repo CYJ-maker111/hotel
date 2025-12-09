@@ -35,6 +35,8 @@ class Scheduler:
         self.current_record_ids: Dict[int, int] = {}
         # 累计秒数，用于每分钟结束时进行温度四舍五入
         self._accumulated_seconds = 0
+        # 记录每个房间本分钟开始时的温度，用于计算实际温度变化
+        self._minute_start_temps: Dict[int, float] = {}
         
         # 设置队列的排序回调函数
         self.served_queue.set_sort_callback(lambda rid: (
@@ -335,10 +337,12 @@ class Scheduler:
     def adjust_temperature(self, room_id: int, new_target_temp: float) -> Dict:
         """
         ChangeTemp(RoomIdTargetTemp)
+        允许 SERVING、WAITING、PAUSED 状态的房间修改目标温度
         """
         room = self.rooms.get(room_id)
+        
+        # SERVING 状态：服务中直接更新目标温度
         if self.served_queue.contains(room_id):
-            # 服务中直接更新目标温度
             self.server.update_target_temperature(room_id, new_target_temp)
             # 创建一条新的详单记录，记录温度变化事件
             self.detail_record.create_record(
@@ -351,8 +355,9 @@ class Scheduler:
                 operation_type="TEMP_CHANGE",
             )
             return {"ok": "SOk"}
+        
+        # WAITING 状态：等待队列中直接更新房间的目标温度
         if self.waiting_queue.contains(room_id):
-            # 等待队列中直接更新房间的目标温度（不通过服务器，因为未服务）
             room.target_temp = new_target_temp
             # 创建一条新的详单记录，记录温度变化事件
             self.detail_record.create_record(
@@ -365,10 +370,27 @@ class Scheduler:
                 operation_type="TEMP_CHANGE",
             )
             return {"ok": "SOk"}
-        # 检查房间实际状态
+        
+        # PAUSED 状态：暂停时也允许修改目标温度
+        if room.state == PowerState.PAUSED:
+            room.target_temp = new_target_temp
+            # 创建一条新的详单记录，记录温度变化事件
+            self.detail_record.create_record(
+                room_id=room_id,
+                start_time=self._now_str(),
+                mode=room.mode.value,
+                target_temp=new_target_temp,
+                fan_speed=room.fan_speed.name,
+                fee_rate=self.server._calc_fee_rate(room.fan_speed),
+                operation_type="TEMP_CHANGE",
+            )
+            return {"ok": "SOk"}
+        
+        # OFF 或其他状态：返回房间状态
         return {
             "room_id": room_id,
             "state": room.state.value.lower(),
+            "message": "房间未开机或状态不允许调温"
         }
 
     def power_off(self, room_id: int) -> Dict:
@@ -416,6 +438,12 @@ class Scheduler:
         self.wait_timer.tick(1)
         # 服务时间更新后立即触发排序
         self.served_queue._sort_rooms()
+        
+        # 如果是本分钟的第一秒，记录所有房间的起始温度
+        if self._accumulated_seconds == 0:
+            for room_id in self.rooms.rooms.keys():
+                room = self.rooms.get(room_id)
+                self._minute_start_temps[room_id] = room.current_temp
 
         # 记录服务状态变化（用于检测目标温度到达）
         before_states = {rid: room.state for rid, room in self.rooms.rooms.items()}
@@ -446,26 +474,53 @@ class Scheduler:
         # 累计秒数加1
         self._accumulated_seconds += 1
         
-        # 每到60秒（1分钟）结束时，对所有房间的温度和费用进行四舍五入
+        # 每到60秒（1分钟）结束时，对所有房间的温度和费用进行四舍五入并对齐
         if self._accumulated_seconds >= 60:
             self._accumulated_seconds = 0
             for room_id in self.rooms.rooms.keys():
                 room = self.rooms.get(room_id)
-                # 温度四舍五入到小数点后一位
-                room.current_temp = round(room.current_temp, 1)
-                # 费用四舍五入到小数点后两位（费用通常保留两位小数）
-                room.cost = round(room.cost, 2)
                 
-                # 同时更新详单记录中的费用
-                record_id = self.current_record_ids.get(room_id)
-                if record_id is not None:
-                    current_record = self.detail_record.get_record(record_id)
-                    if current_record:
-                        # 使用四舍五入后的费用更新记录
-                        self.detail_record.update_on_service(
-                            record_id,
-                            cost=room.cost,
-                        )
+                # 如果房间在本分钟内处于SERVING状态，需要调整费用与温度变化对齐
+                if room.state == PowerState.SERVING and room_id in self._minute_start_temps:
+                    # 获取本分钟开始时的温度
+                    start_temp = self._minute_start_temps[room_id]
+                    # 四舍五入前的温度变化（绝对值）
+                    temp_change_before = abs(room.current_temp - start_temp)
+                    
+                    # 温度四舍五入到小数点后一位
+                    old_temp = room.current_temp
+                    room.current_temp = round(room.current_temp, 1)
+                    
+                    # 四舍五入后的温度变化（绝对值）
+                    temp_change_after = abs(room.current_temp - start_temp)
+                    
+                    # 费用调整：根据温度四舍五入后的实际变化调整费用
+                    # 因为费用 = 温度变化量（℃）* 1元/1℃
+                    cost_adjustment = temp_change_after - temp_change_before
+                    
+                    # 调整费用
+                    room.cost += cost_adjustment
+                    room.cost = round(room.cost, 2)
+                    
+                    # 同时更新详单记录中的费用
+                    record_id = self.current_record_ids.get(room_id)
+                    if record_id is not None:
+                        current_record = self.detail_record.get_record(record_id)
+                        if current_record:
+                            # 使用调整后的费用更新记录
+                            adjusted_cost = current_record["cost"] + cost_adjustment
+                            adjusted_cost = round(adjusted_cost, 2)
+                            self.detail_record.update_on_service(
+                                record_id,
+                                cost=adjusted_cost,
+                            )
+                else:
+                    # 非SERVING状态的房间，直接四舍五入温度
+                    room.current_temp = round(room.current_temp, 1)
+                    room.cost = round(room.cost, 2)
+                
+                # 更新本分钟开始时的温度为四舍五入后的当前温度
+                self._minute_start_temps[room_id] = room.current_temp
 
         # 检查是否有服务对象的目标温度到达或关机（状态变化）
         after_states = {rid: room.state for rid, room in self.rooms.rooms.items()}
