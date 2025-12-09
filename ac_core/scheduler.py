@@ -232,6 +232,20 @@ class Scheduler:
             
             return {"ok": "SOk"}
         
+        # PAUSED 状态：暂停时也允许修改风速
+        if room.state == PowerState.PAUSED:
+            # 创建一条新的详单记录，记录风速变化事件
+            self.detail_record.create_record(
+                room_id=room_id,
+                start_time=self._now_str(),
+                mode=room.mode.value,
+                target_temp=room.target_temp,
+                fan_speed=new_speed.name,
+                fee_rate=self.server._calc_fee_rate(new_speed),
+                operation_type="SPEED_CHANGE",
+            )
+            return {"ok": "SOk"}
+        
         # 检查房间实际状态
         return {
             "room_id": room_id,
@@ -395,6 +409,9 @@ class Scheduler:
 
     def power_off(self, room_id: int) -> Dict:
         room = self.rooms.get(room_id)
+        # 保存关机前的模式，用于后续设置默认温度
+        current_mode = room.mode
+        
         if self.served_queue.contains(room_id):
             self.served_queue.pop(room_id)
             self.service_timer.remove_timer(room_id)
@@ -402,7 +419,7 @@ class Scheduler:
             self.waiting_queue.pop(room_id)
             self.wait_timer._waiting_seconds.pop(room_id, None)
         room.state = PowerState.OFF
-        # 结束当前详单记录
+        # 结束当前详单记录 - 此时还未修改目标温度，记录的是关机前的正确温度
         record_id = self.current_record_ids.pop(room_id, None)
         if record_id is not None:
             totals = self.detail_record.get_room_total(room_id)
@@ -411,6 +428,13 @@ class Scheduler:
                 cost=totals["total_cost"],
                 end_time=self._now_str(),
             )
+        
+        # 详单记录完成后，将目标温度恢复为默认值
+        # 制冷模式默认25度，制热模式默认23度
+        if current_mode == Mode.COOL:
+            room.target_temp = 25.0
+        else:  # HEAT模式
+            room.target_temp = 23.0
         
         # 获取当前费用和总费用
         totals = self.detail_record.get_room_total(room_id)

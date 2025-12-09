@@ -16,14 +16,17 @@ class Server:
         """
         设置初次开机的模式与目标温度，返回 (mode, target_temp, fee_rate)。
         支持前端传入模式，默认为制冷模式。
-        默认目标温度统一设置为25℃，其他调温操作通过update_target_temperature或测试用例进行。
+        制冷模式默认目标温度为25℃，制热模式默认目标温度为23℃。
         """
         room = self.rooms.get(room_id)
         room.current_temp = self._normalize_temp(current_room_temp)
         room.mode = mode
         
-        # 默认目标温度统一设置为25℃，确保温度值为整数
-        room.target_temp = 25.0
+        # 根据模式设置不同的默认目标温度
+        if mode == Mode.COOL:
+            room.target_temp = 25.0  # 制冷模式默认温度为25℃
+        else:  # HEAT模式
+            room.target_temp = 23.0  # 制热模式默认温度为23℃
             
         room.fan_speed = FanSpeed.MEDIUM
         room.state = PowerState.SERVING

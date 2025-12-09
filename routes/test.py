@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 import re
 import os
 from threading import Lock
@@ -22,8 +22,12 @@ test_cases = test_state.test_cases
 current_minute = test_state.current_step
 test_lock = test_state.lock
 
-# 测试用例文件路径
-TEST_FILE_PATH = r'./test.txt'
+# 测试用例文件路径配置
+TEST_FILES = {
+    'cooling': r'c:\\Users\\LJM\\Desktop\\ac_system\\hotel\\制冷.txt',
+    'heating': r'c:\\Users\\LJM\\Desktop\\ac_system\\hotel\\制热.txt',
+    'default': r'./test.txt'
+}
 
 @test_bp.route('/api/test/load', methods=['GET'])
 def load_test_cases():
@@ -31,15 +35,26 @@ def load_test_cases():
     global test_cases, current_minute
     
     try:
+        # 获取测试类型参数
+        test_type = request.args.get('type', 'default')
+        
+        # 根据测试类型选择对应的文件路径
+        if test_type in TEST_FILES:
+            file_path = TEST_FILES[test_type]
+            test_name = '制冷' if test_type == 'cooling' else '制热' if test_type == 'heating' else '默认'
+        else:
+            file_path = TEST_FILES['default']
+            test_name = '默认'
+        
         # 检查文件是否存在
-        if not os.path.exists(TEST_FILE_PATH):
+        if not os.path.exists(file_path):
             return jsonify({
                 'success': False,
-                'message': f'测试用例文件不存在: {TEST_FILE_PATH}'
+                'message': f'{test_name}测试用例文件不存在: {file_path}'
             })
         
         # 解析测试用例文件
-        with open(TEST_FILE_PATH, 'r', encoding='utf-8') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             content = f.readlines()
         
         test_cases = []
@@ -131,7 +146,7 @@ def load_test_cases():
         
         return jsonify({
             'success': True,
-            'message': f'成功加载{len(test_cases)}个时刻的测试用例',
+            'message': f'成功加载{test_name}测试用例，共{len(test_cases)}个时刻',
             'total_minutes': len(test_cases),
             'test_cases': test_cases,
             'initial_temperatures': test_state.initial_temperatures,

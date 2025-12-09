@@ -497,21 +497,41 @@ async function applyInitialSettings() {
     // 默认风速将在房间开机时自动应用
 }
 
-async function loadTestCases() {
+// 确保testState对象已初始化
+window.testState = window.testState || {
+    mode: 'cooling', // 默认模式
+    current_step: 0,
+    total_steps: 0
+};
+
+async function loadTestCases(testType = null) {
     const loadBtn = document.getElementById('load-test-btn');
+    const coolingBtn = document.getElementById('cooling-test-btn');
+    const heatingBtn = document.getElementById('heating-test-btn');
     const startBtn = document.getElementById('start-test-btn');
     
     try {
         // 禁用按钮防止重复点击
         if (loadBtn) loadBtn.disabled = true;
-        if (loadBtn) loadBtn.textContent = '加载中...';
+        if (coolingBtn) coolingBtn.disabled = true;
+        if (heatingBtn) heatingBtn.disabled = true;
         
-        const response = await fetchJSON('/api/test/load');
+        if (loadBtn && !testType) loadBtn.textContent = '加载中...';
+        if (coolingBtn && testType === 'cooling') coolingBtn.textContent = '加载中...';
+        if (heatingBtn && testType === 'heating') heatingBtn.textContent = '加载中...';
+        
+        // 构建URL，添加测试类型参数
+        const url = testType ? `/api/test/load?type=${testType}` : '/api/test/load';
+        const response = await fetchJSON(url);
         
         if (response.success) {
             alert(response.message);
             totalTestMinutes = response.total_minutes;
             currentTestMinute = 0;
+            
+            // 保存测试模式
+            testState.mode = testType || 'cooling';
+            console.log('测试模式设置:', testState.mode);
             
             // 保存初始温度和默认风速设置
             if (response.initial_temperatures) {
@@ -547,6 +567,14 @@ async function loadTestCases() {
             loadBtn.disabled = false;
             loadBtn.textContent = '加载测试用例';
         }
+        if (coolingBtn) {
+            coolingBtn.disabled = false;
+            coolingBtn.textContent = '制冷测试';
+        }
+        if (heatingBtn) {
+            heatingBtn.disabled = false;
+            heatingBtn.textContent = '制热测试';
+        }
     }
 }
 
@@ -560,11 +588,14 @@ async function executeRoomOperation(operation) {
             case 'power_on':
                 // 不传递current_temp参数，让后端使用房间的实际温度
                 // 初始温度只在测试开始时通过applyInitialSettings函数设置
+                // 传递正确的模式参数，基于测试状态中的mode值
+                const mode = testState.mode === 'heating' ? 'HEAT' : 'COOL';
                 await fetchJSON(`/api/rooms/${numericRoomId}/power_on`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: mode })
                 });
-                console.log(`房间${roomId}开机成功，使用当前实际温度`);
+                console.log(`房间${roomId}开机成功，使用当前实际温度，模式: ${mode}`);
                 break;
             case 'power_off':
                 await fetchJSON(`/api/rooms/${numericRoomId}/power_off`, {
@@ -943,12 +974,22 @@ async function init() {
     
     // 测试用例相关按钮事件
     const loadTestBtn = document.getElementById('load-test-btn');
+    const coolingTestBtn = document.getElementById('cooling-test-btn');
+    const heatingTestBtn = document.getElementById('heating-test-btn');
     const autoTestBtn = document.getElementById('auto-test-btn');
     const startTestBtn = document.getElementById('start-test-btn');
     const nextStepBtn = document.getElementById('next-step-btn');
     
     if (loadTestBtn) {
-        loadTestBtn.onclick = loadTestCases;
+        loadTestBtn.onclick = () => loadTestCases();
+    }
+    
+    if (coolingTestBtn) {
+        coolingTestBtn.onclick = () => loadTestCases('cooling');
+    }
+    
+    if (heatingTestBtn) {
+        heatingTestBtn.onclick = () => loadTestCases('heating');
     }
     
     if (autoTestBtn) {
