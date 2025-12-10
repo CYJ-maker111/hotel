@@ -34,6 +34,9 @@ def load_test_cases():
     """加载并解析测试用例文件"""
     global test_cases, current_minute
     
+    # 导入系统实例
+    from app_context import system
+    
     try:
         # 获取测试类型参数
         test_type = request.args.get('type', 'default')
@@ -45,6 +48,11 @@ def load_test_cases():
         else:
             file_path = TEST_FILES['default']
             test_name = '默认'
+        
+        # 在加载新测试用例前，完全重置系统状态
+        print(f"\n========== 开始加载{test_name}测试用例 ==========")
+        print("正在重置系统状态...")
+        system.reset_system()
         
         # 检查文件是否存在
         if not os.path.exists(file_path):
@@ -62,7 +70,8 @@ def load_test_cases():
         # 遍历每一行，解析时刻和操作
         for line in content:
             line = line.strip()
-            if not line or line.startswith('制冷测试用例'):
+            # 跳过空行和测试用例标题行（制冷测试用例、制热测试用例等）
+            if not line or '测试用例' in line:
                 continue
             
             # 解析初始温度设置

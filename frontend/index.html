@@ -160,6 +160,13 @@
                     <label for="co-room-select">选择房间</label>
                     <select id="co-room-select"></select>
                 </div>
+                <div>
+                    <label for="co-bill-type">账单类型</label>
+                    <select id="co-bill-type">
+                        <option value="accommodation">系统住宿账单</option>
+                        <option value="ac">空调账单</option>
+                    </select>
+                </div>
                 <div style="align-self:flex-end;">
                     <button id="co-refresh-rooms" class="primary">刷新房间列表</button>
                 </div>
@@ -167,11 +174,11 @@
             <div style="margin-top:8px;">
                 <button id="co-load-bill" class="primary">查询账单</button>
                 <button id="co-view-detail" style="margin-left:4px;">查看详单</button>
+                <button id="co-export" class="primary" style="margin-left:4px;">导出Excel</button>
                 <button id="co-checkout" style="margin-left:4px;">结账退房</button>
-                <button id="co-print" style="margin-left:4px;">打印账单</button>
             </div>
             <div id="co-bill" style="margin-top:12px; font-size:13px;">
-                <p class="muted">请选择房间并点击“查询账单”。</p>
+                <p class="muted">请选择房间、账单类型，然后点击"查询账单"。</p>
             </div>
             <div id="co-detail" style="margin-top:12px; font-size:13px; display:none;">
                 <h3>空调使用详单</h3>

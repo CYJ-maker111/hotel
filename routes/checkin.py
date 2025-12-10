@@ -9,11 +9,19 @@ checkin_bp = Blueprint('checkin', __name__, url_prefix='/api/rooms')
 def checkin(room_id: int):
     """
     登记入住API：记录客人信息并可选地开机
+    要求：必须填写客人姓名和入住时间
     """
     data = request.get_json(silent=True) or {}
-    guest_name = data.get('guest_name', '')
-    checkin_time = data.get('checkin_time', '')
+    guest_name = data.get('guest_name', '').strip()
+    checkin_time = data.get('checkin_time', '').strip()
     checkout_time = data.get('checkout_time', '')
+    
+    # 验证必填字段
+    if not guest_name:
+        return jsonify({"status": "error", "message": "请填写客人姓名"}), 400
+    
+    if not checkin_time:
+        return jsonify({"status": "error", "message": "请填写入住时间"}), 400
     
     # 连接数据库
     db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'hotel_ac.db')
@@ -38,7 +46,8 @@ def checkin(room_id: int):
             "guest_name": guest_name,
             "checkin_time": checkin_time,
             "checkout_time": checkout_time,
-            "status": "success"
+            "status": "success",
+            "message": "登记入住成功"
         })
     except Exception as e:
         conn.rollback()

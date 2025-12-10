@@ -45,8 +45,26 @@ class Server:
         """
         更新目标温度，返回新的目标温度。
         规范化目标温度，确保精度一致。
+        温度范围限制：
+        - 制冷模式：18-28℃
+        - 制热模式：18-25℃，超过25℃按25℃计算
         """
         room = self.rooms.get(room_id)
+        
+        # 根据模式限制目标温度范围
+        if room.mode == Mode.COOL:
+            # 制冷模式：18-28℃
+            if new_target_temp < 18:
+                new_target_temp = 18
+            elif new_target_temp > 28:
+                new_target_temp = 28
+        else:  # HEAT模式
+            # 制热模式：18-25℃
+            if new_target_temp < 18:
+                new_target_temp = 18
+            elif new_target_temp > 25:
+                new_target_temp = 25  # 超过25℃按25℃计算
+        
         # 规范化目标温度，保留2位小数（温度通常只需要1-2位小数精度）
         room.target_temp = self._normalize_temp(new_target_temp)
         return room.target_temp

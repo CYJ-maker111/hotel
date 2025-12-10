@@ -232,16 +232,26 @@ async function checkinRoom() {
     const checkoutTime = checkoutTimeInput.value;
     
     if (!roomId) {
-        messageDiv.innerHTML = "<p class='error'>请选择有效的房间号。</p>";
+        messageDiv.innerHTML = "<p style='color:#dc2626;'>⚠️ 请选择有效的房间号。</p>";
         return;
     }
     
     if (!guestName) {
-        messageDiv.innerHTML = "<p class='error'>请输入客人姓名。</p>";
+        messageDiv.innerHTML = "<p style='color:#dc2626;'>⚠️ 请输入客人姓名。</p>";
         return;
     }
     
-    // 可以在这里添加更多验证逻辑
+    // 强制验证入住时间
+    if (!checkinTime) {
+        messageDiv.innerHTML = "<p style='color:#dc2626;'>⚠️ 请填写入住时间！入住时间为必填项。</p>";
+        // 高亮显示输入框
+        checkinTimeInput.style.border = "2px solid #dc2626";
+        checkinTimeInput.focus();
+        setTimeout(() => {
+            checkinTimeInput.style.border = "";
+        }, 3000);
+        return;
+    }
     
     try {
         // 发送登记入住请求
@@ -255,7 +265,7 @@ async function checkinRoom() {
             })
         });
         
-        messageDiv.innerHTML = `<p class='success'>房间 ${roomId} 登记入住成功！客人：${guestName}</p>`;
+        messageDiv.innerHTML = `<p style='color:#16a34a;'>✓ 房间 ${roomId} 登记入住成功！客人：${guestName}</p>`;
         
         // 清空表单
         guestNameInput.value = "";
@@ -263,7 +273,7 @@ async function checkinRoom() {
         checkoutTimeInput.value = "";
         
     } catch (error) {
-        messageDiv.innerHTML = `<p class='error'>登记入住失败：${error.message}</p>`;
+        messageDiv.innerHTML = `<p style='color:#dc2626;'>✗ 登记入住失败：${error.message}</p>`;
     }
 }
 
@@ -279,6 +289,68 @@ async function loadCheckoutRooms() {
         opt.textContent = `房间 ${r.room_id}`;
         select.appendChild(opt);
     });
+}
+
+// 加载账单
+async function loadCheckoutBill() {
+    const select = document.getElementById("co-room-select");
+    const billTypeSelect = document.getElementById("co-bill-type");
+    const container = document.getElementById("co-bill");
+    const roomId = parseInt(select.value);
+    
+    if (!roomId) {
+        container.innerHTML = "<p class='muted'>请先选择房间。</p>";
+        return;
+    }
+    
+    const billType = billTypeSelect ? billTypeSelect.value : 'accommodation';
+    const endpoint = billType === 'ac' ? 'ac_bill' : 'accommodation_bill';
+    
+    try {
+        const bill = await fetchJSON(`/api/bills/${roomId}/${endpoint}`);
+        
+        let html = `<h3>${bill.bill_type}</h3>`;
+        html += `<table style="width:100%; border-collapse: collapse; font-size:13px;">`;
+        html += `<tr><td style="padding:6px; border:1px solid #eee;"><strong>房间号</strong></td><td style="padding:6px; border:1px solid #eee;">${bill.room_id}</td></tr>`;
+        html += `<tr><td style="padding:6px; border:1px solid #eee;"><strong>客人姓名</strong></td><td style="padding:6px; border:1px solid #eee;">${bill.guest_name}</td></tr>`;
+        html += `<tr><td style="padding:6px; border:1px solid #eee;"><strong>入住时间</strong></td><td style="padding:6px; border:1px solid #eee;">${bill.checkin_time}</td></tr>`;
+        html += `<tr><td style="padding:6px; border:1px solid #eee;"><strong>结束时间</strong></td><td style="padding:6px; border:1px solid #eee;">${bill.end_time}</td></tr>`;
+        html += `<tr><td style="padding:6px; border:1px solid #eee;"><strong>住宿天数</strong></td><td style="padding:6px; border:1px solid #eee;">${bill.days} 天</td></tr>`;
+        
+        if (billType === 'accommodation') {
+            html += `<tr><td style="padding:6px; border:1px solid #eee;"><strong>房间日租金</strong></td><td style="padding:6px; border:1px solid #eee;">¥${bill.daily_rate}</td></tr>`;
+            html += `<tr><td style="padding:6px; border:1px solid #eee;"><strong>住宿费用</strong></td><td style="padding:6px; border:1px solid #eee;">¥${bill.accommodation_cost}</td></tr>`;
+        }
+        
+        html += `<tr><td style="padding:6px; border:1px solid #eee;"><strong>空调费用</strong></td><td style="padding:6px; border:1px solid #eee;">¥${bill.ac_total_cost}</td></tr>`;
+        html += `<tr><td style="padding:6px; border:1px solid #eee;"><strong>总计</strong></td><td style="padding:6px; border:1px solid #eee; font-weight:bold; font-size:16px;">¥${bill.total_cost}</td></tr>`;
+        html += `</table>`;
+        
+        container.innerHTML = html;
+    } catch (error) {
+        container.innerHTML = `<p style='color:#dc2626;'>加载账单失败：${error.message}</p>`;
+    }
+}
+
+// 导出Excel账单
+async function exportBill() {
+    const select = document.getElementById("co-room-select");
+    const billTypeSelect = document.getElementById("co-bill-type");
+    const roomId = parseInt(select.value);
+    
+    if (!roomId) {
+        alert("请先选择房间");
+        return;
+    }
+    
+    const billType = billTypeSelect ? billTypeSelect.value : 'accommodation';
+    
+    try {
+        // 直接下载Excel文件
+        window.location.href = `/api/bills/${roomId}/export?bill_type=${billType}`;
+    } catch (error) {
+        alert("导出失败：" + error.message);
+    }
 }
 
 // 查看详单相关函数
@@ -323,40 +395,7 @@ async function viewRoomDetail() {
     }
 }
 
-async function loadCheckoutBill() {
-    const select = document.getElementById("co-room-select");
-    const container = document.getElementById("co-bill");
-    if (!select || !container) return;
-    const roomId = parseInt(select.value, 10);
-    if (!roomId) {
-        container.innerHTML = "<p class='muted'>请选择有效的房间号。</p>";
-        return;
-    }
-    
-    try {
-        // 获取综合账单（包含住宿费和空调费）
-        const bill = await fetchJSON(`/api/bills/${roomId}/comprehensive`);
-        
-        let html = `
-            <div style="border: 1px solid #e5e7eb; padding: 16px; border-radius: 8px; background: #f9fafb;">
-                <h3 style="margin-top: 0;">综合账单</h3>
-                <table style="width: 100%; border: none;">
-                    <tr><td><b>房间号：</b></td><td>R${bill.room_id}</td></tr>
-                    <tr><td><b>客人姓名：</b></td><td>${bill.guest_name}</td></tr>
-                    <tr><td><b>入住时间：</b></td><td>${bill.checkin_time}</td></tr>
-                    <tr><td><b>离开时间：</b></td><td>${bill.checkout_time || '未退房'}</td></tr>
-                    <tr><td><b>关机次数：</b></td><td>${bill.power_off_count} 次</td></tr>
-                    <tr><td><b>住宿费用：</b></td><td>${bill.accommodation_cost.toFixed(2)} 元 (${bill.daily_rate}元/天 × ${bill.power_off_count}天)</td></tr>
-                    <tr><td><b>空调费用：</b></td><td>${bill.ac_total_cost.toFixed(2)} 元</td></tr>
-                    <tr style="border-top: 2px solid #374151;"><td><b>总计：</b></td><td style="font-size: 18px; color: #dc2626;"><b>${bill.total_cost.toFixed(2)} 元</b></td></tr>
-                </table>
-            </div>
-        `;
-        container.innerHTML = html;
-    } catch (error) {
-        container.innerHTML = `<p style="color: #dc2626;">获取账单失败：${error.message}</p>`;
-    }
-}
+// 删除旧的loadCheckoutBill函数，已在上面重新定义
 
 async function checkoutRoom() {
     const select = document.getElementById("co-room-select");
@@ -406,7 +445,9 @@ function initFrontdeskView() {
     const loadBillBtn = document.getElementById("co-load-bill");
     const viewDetailBtn = document.getElementById("co-view-detail");
     const checkoutBtn = document.getElementById("co-checkout");
-    const printBtn = document.getElementById("co-print");
+    const exportBtn = document.getElementById("co-export");
+    const billTypeSelect = document.getElementById("co-bill-type");
+    
     if (coRefreshBtn) {
         coRefreshBtn.onclick = () => loadCheckoutRooms();
     }
@@ -419,8 +460,17 @@ function initFrontdeskView() {
     if (checkoutBtn) {
         checkoutBtn.onclick = () => checkoutRoom();
     }
-    if (printBtn) {
-        printBtn.onclick = () => window.print();
+    if (exportBtn) {
+        exportBtn.onclick = () => exportBill();
+    }
+    // 账单类型改变时自动刷新账单
+    if (billTypeSelect) {
+        billTypeSelect.onchange = () => {
+            const billDiv = document.getElementById("co-bill");
+            if (billDiv && billDiv.innerHTML.includes("房间号")) {
+                loadCheckoutBill();
+            }
+        };
     }
     
     // 初始加载数据

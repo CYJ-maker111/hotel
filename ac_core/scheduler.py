@@ -859,6 +859,7 @@ class Scheduler:
             "total_cost": round(summary["total_cost"], 2),
         }
 
+
     @staticmethod
     def _now_str() -> str:
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -870,19 +871,48 @@ class HotelACSystem:
     """
 
     def __init__(self, room_count: int, served_capacity: int, waiting_capacity: int, time_slice_seconds: int):
-        self.rooms = RoomRepository(room_count)
+        # 保存初始化参数，用于重启时重新创建对象
+        self._room_count = room_count
+        self._served_capacity = served_capacity
+        self._waiting_capacity = waiting_capacity
+        self._time_slice_seconds = time_slice_seconds
+        
+        # 初始化系统组件
+        self._initialize_system()
+
+    def _initialize_system(self):
+        """内部方法：初始化系统所有组件"""
+        # 创建全新的 RoomRepository - 所有房间对象重新创建
+        self.rooms = RoomRepository(self._room_count)
+        
+        # 创建全新的 DetailRecord - 清空数据库
         self.detail_record = DetailRecord()
+        self.detail_record.clear_all_records()  # 清空数据库中的所有记录
+        
+        # 创建全新的 Scheduler - 所有队列、计时器重新创建
         self.scheduler = Scheduler(
             rooms=self.rooms,
-            served_capacity=served_capacity,
-            waiting_capacity=waiting_capacity,
-            time_slice_seconds=time_slice_seconds,
+            served_capacity=self._served_capacity,
+            waiting_capacity=self._waiting_capacity,
+            time_slice_seconds=self._time_slice_seconds,
             detail_record=self.detail_record,
         )
 
     def tick(self, seconds: int) -> None:
         self.scheduler.tick(seconds)
 
+    def reset_system(self):
+        """
+        完全重启系统 - 等同于重新运行程序
+        重新创建所有对象：RoomRepository、DetailRecord、Scheduler、队列、计时器等
+        """
+        print("✓ 正在重启系统（等同于重新运行程序）...")
+        
+        # 重新初始化整个系统 - 所有对象重新创建
+        self._initialize_system()
+        
+        print("✓ 系统重启完成！所有对象已重新创建")
+    
     def clear_all_records(self):
         """
         清除所有房间的详单记录。
