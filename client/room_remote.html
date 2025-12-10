@@ -4,163 +4,176 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>空调控制面板</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg: #0c1424;
+            --card: rgba(255, 255, 255, 0.07);
+            --card-border: rgba(255, 255, 255, 0.12);
+            --text: #eef3ff;
+            --muted: #9fb3c8;
+            --accent: #5ac8fa;
+            --accent-strong: #7c5dfa;
+            --danger: #ff6b6b;
+            --success: #4ade80;
+            --warning: #facc15;
+            --shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+            --radius: 16px;
+        }
+        * { box-sizing: border-box; }
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f0f0f0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: radial-gradient(120% 140% at 10% 10%, rgba(124, 93, 250, 0.12), transparent 45%),
+                        radial-gradient(120% 140% at 90% 20%, rgba(90, 200, 250, 0.12), transparent 50%),
+                        linear-gradient(135deg, #0b1320 0%, #0f1d33 50%, #0c1424 100%);
             margin: 0;
-            padding: 20px;
+            min-height: 100vh;
             display: flex;
-            justify-content: center;
             align-items: center;
-            height: 100vh;
+            justify-content: center;
+            color: var(--text);
+            padding: 24px;
         }
-
         .ac-panel {
-            background-color: white;
-            border-radius: 20px;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
-            padding: 30px;
-            width: 320px;
+            width: 360px;
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 24px;
             text-align: center;
+            backdrop-filter: blur(12px);
         }
-
+        .room-selector {
+            margin-bottom: 16px;
+            text-align: left;
+            color: var(--muted);
+            font-size: 13px;
+        }
+        .room-selector select {
+            width: 100%;
+            padding: 12px;
+            font-size: 14px;
+            border-radius: 12px;
+            border: 1px solid var(--card-border);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+        }
         .room-info {
-            margin-bottom: 20px;
-            padding: 10px;
-            background-color: #f8f9fa;
-            border-radius: 10px;
+            margin-bottom: 16px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid var(--card-border);
         }
-
         .temperature-display {
             font-size: 64px;
-            font-weight: bold;
-            color: #333;
-            margin: 20px 0;
+            font-weight: 700;
+            color: var(--text);
+            margin: 16px 0 4px;
+            line-height: 1;
         }
-
         .target-temp {
-            font-size: 24px;
-            color: #666;
-            margin: 10px 0;
+            font-size: 16px;
+            color: var(--muted);
+            margin: 0 0 12px;
         }
-
-        .controls {
-            margin: 20px 0;
+        .meta {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
         }
-
+        .controls { margin: 18px 0 0; }
         .temp-controls {
             display: flex;
             justify-content: center;
             align-items: center;
-            margin: 20px 0;
+            gap: 14px;
+            margin: 14px 0 18px;
         }
-
+        .chip {
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--muted);
+            font-size: 12px;
+            border: 1px solid var(--card-border);
+        }
         .temp-button {
-            width: 50px;
-            height: 50px;
+            width: 54px;
+            height: 54px;
             font-size: 24px;
-            background-color: #007bff;
+            background: linear-gradient(140deg, var(--accent-strong), var(--accent));
             color: white;
             border: none;
-            border-radius: 50%;
+            border-radius: 14px;
             cursor: pointer;
-            margin: 0 10px;
+            box-shadow: 0 10px 24px rgba(124, 93, 250, 0.35);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
         }
-
-        .temp-button:hover {
-            background-color: #0056b3;
-        }
-
-        .mode-controls {
-            display: flex;
-            justify-content: center;
-            margin: 20px 0;
-        }
-
-        .mode-button {
-            padding: 10px 20px;
-            margin: 0 5px;
-            border: 1px solid #ddd;
-            background-color: white;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-
-        .mode-button.active {
-            background-color: #007bff;
-            color: white;
-            border-color: #007bff;
-        }
-
+        .temp-button:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(124,93,250,0.4); }
+        .mode-controls,
         .speed-controls {
             display: flex;
             justify-content: center;
-            margin: 20px 0;
+            gap: 8px;
+            margin: 14px 0;
+            flex-wrap: wrap;
         }
-
+        .mode-button,
         .speed-button {
-            padding: 10px 15px;
-            margin: 0 5px;
-            border: 1px solid #ddd;
-            background-color: white;
-            border-radius: 5px;
+            padding: 10px 16px;
+            border: 1px solid var(--card-border);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            border-radius: 12px;
             cursor: pointer;
+            font-size: 13px;
+            min-width: 76px;
+            transition: all 0.15s ease;
         }
-
-        .speed-button.active {
-            background-color: #28a745;
-            color: white;
-            border-color: #28a745;
-        }
-
-        .power-button {
-            padding: 15px 40px;
-            font-size: 18px;
-            background-color: #dc3545;
-            color: white;
+        .mode-button:hover,
+        .speed-button:hover { border-color: rgba(90, 200, 250, 0.6); }
+        .mode-button.active {
+            background: linear-gradient(140deg, var(--accent-strong), var(--accent));
             border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            margin: 20px 0;
+            box-shadow: 0 10px 24px rgba(124, 93, 250, 0.35);
         }
-
-        .power-button.on {
-            background-color: #28a745;
+        .speed-button.active {
+            background: linear-gradient(140deg, #22d3ee, #0ea5e9);
+            border: none;
+            box-shadow: 0 10px 24px rgba(14, 165, 233, 0.35);
         }
-
-        .status {
-            margin: 20px 0;
-            padding: 10px;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-
-        .status.serving {
-            background-color: #d4edda;
-            color: #155724;
-        }
-
-        .status.waiting {
-            background-color: #fff3cd;
-            color: #856404;
-        }
-
-        .status.off {
-            background-color: #f8d7da;
-            color: #721c24;
-        }
-
-        .room-selector {
-            margin-bottom: 20px;
-        }
-
-        .room-selector select {
-            padding: 10px;
+        .power-button {
+            width: 100%;
+            padding: 14px;
             font-size: 16px;
-            border-radius: 5px;
-            border: 1px solid #ddd;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            margin: 12px 0 0;
+            color: #fff;
+            background: linear-gradient(140deg, var(--danger), #ff4d4d);
+            box-shadow: 0 12px 28px rgba(255, 107, 107, 0.35);
+            transition: all 0.2s ease;
         }
+        .power-button.on {
+            background: linear-gradient(140deg, #34d399, #22c55e);
+            box-shadow: 0 12px 28px rgba(52, 211, 153, 0.35);
+        }
+        .power-button:hover { transform: translateY(-1px); }
+        .status {
+            margin: 14px 0;
+            padding: 10px 12px;
+            border-radius: 12px;
+            font-weight: 700;
+            border: 1px solid var(--card-border);
+        }
+        .status.serving { background: rgba(74, 222, 128, 0.14); color: var(--success); }
+        .status.waiting { background: rgba(250, 204, 21, 0.14); color: var(--warning); }
+        .status.off { background: rgba(255, 255, 255, 0.05); color: var(--muted); }
     </style>
 </head>
 <body>
