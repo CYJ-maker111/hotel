@@ -1,8 +1,9 @@
 from flask import Blueprint, request, jsonify, send_file
 import sqlite3
 import os
+import csv
 from datetime import datetime, timedelta
-from io import BytesIO
+from io import BytesIO, StringIO
 from app_context import system
 
 # 尝试导入openpyxl，如果没有安装则在导出时提示
@@ -68,6 +69,128 @@ def get_room_bill_detail(room_id):
     finally:
         conn.close()
 
+@bills_bp.route('/<int:room_id>/detail/export_csv', methods=['GET'])
+def export_detail_csv(room_id):
+    """
+    导出指定房间的空调使用详单为CSV文件
+    """
+    # 连接数据库
+    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'hotel_ac.db')
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        # 获取房间信息（用于文件名）
+        cursor.execute("""
+            SELECT guest_name, checkin_time
+            FROM checkin_records 
+            WHERE room_id = ? AND status = 'CHECKED_IN'
+            ORDER BY checkin_time DESC
+            LIMIT 1
+        """, (room_id,))
+        
+        checkin_info = cursor.fetchone()
+        guest_name = checkin_info[0] if checkin_info else ""
+        
+        # 查询房间的详单记录
+        cursor.execute("""
+            SELECT room_id, request_time, start_time, end_time, service_duration, 
+                   fan_speed, cost, accumulated_cost, mode, target_temp, operation_type
+            FROM detail_records 
+            WHERE room_id = ? 
+            ORDER BY start_time ASC
+        """, (room_id,))
+        
+        records = cursor.fetchall()
+        
+        # 创建CSV内容
+        output = StringIO()
+        # 使用quoting=csv.QUOTE_ALL确保所有字段都用引号包裹，避免Excel解析错误
+        writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+        
+        # 写入BOM（用于Excel正确显示中文）
+        output.write('\ufeff')
+        
+        # 写入表头
+        headers = ["房间号", "请求时间", "开始时间", "结束时间", "服务时长(秒)", 
+                   "风速", "费用(元)", "累积费用(元)", "模式", "目标温度(℃)", "操作类型"]
+        writer.writerow(headers)
+        
+        # 写入数据
+        for record in records:
+            # 格式化日期时间，确保格式正确
+            request_time = record[1] or record[2] or ''
+            start_time = record[2] or ''
+            end_time = record[3] or ''
+            
+            # 确保日期时间格式为 YYYY-MM-DD HH:MM:SS（Excel能识别的格式）
+            # 如果已经是正确格式，直接使用；否则尝试转换
+            try:
+                if request_time and len(request_time) > 10:
+                    # 如果包含时间部分，确保格式正确
+                    if 'T' in request_time:
+                        request_time = request_time.replace('T', ' ')
+                    if '.' in request_time:
+                        request_time = request_time.split('.')[0]
+            except:
+                pass
+            
+            try:
+                if start_time and len(start_time) > 10:
+                    if 'T' in start_time:
+                        start_time = start_time.replace('T', ' ')
+                    if '.' in start_time:
+                        start_time = start_time.split('.')[0]
+            except:
+                pass
+            
+            try:
+                if end_time and len(end_time) > 10:
+                    if 'T' in end_time:
+                        end_time = end_time.replace('T', ' ')
+                    if '.' in end_time:
+                        end_time = end_time.split('.')[0]
+            except:
+                pass
+            
+            writer.writerow([
+                record[0],  # room_id
+                request_time,  # request_time
+                start_time,  # start_time
+                end_time,  # end_time
+                record[4] or 0,  # service_duration
+                record[5] or '',  # fan_speed
+                round(record[6], 2) if record[6] else 0,  # cost
+                round(record[7], 2) if record[7] else 0,  # accumulated_cost
+                record[8] or '',  # mode
+                record[9] or '',  # target_temp
+                record[10] or ''  # operation_type
+            ])
+        
+        # 准备文件内容
+        output.seek(0)
+        csv_content = output.getvalue()
+        output.close()
+        
+        # 生成文件名
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"房间{room_id}_空调使用详单_{timestamp}.csv"
+        if guest_name:
+            filename = f"房间{room_id}_{guest_name}_空调使用详单_{timestamp}.csv"
+        
+        # 返回CSV文件
+        return send_file(
+            BytesIO(csv_content.encode('utf-8-sig')),  # utf-8-sig包含BOM，Excel可以正确打开
+            mimetype='text/csv; charset=utf-8',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"导出CSV失败：{str(e)}"}), 500
+    finally:
+        conn.close()
+
 @bills_bp.route('/<int:room_id>/summary', methods=['GET'])
 def get_room_bill_summary(room_id):
     """
@@ -128,19 +251,21 @@ def get_ac_bill(room_id):
     cursor = conn.cursor()
     
     try:
-        # 获取入住信息
+        # 获取入住信息（优先获取当前入住的，如果没有则获取最近的一条记录）
         cursor.execute("""
             SELECT guest_name, checkin_time, power_off_count
             FROM checkin_records 
-            WHERE room_id = ? AND status = 'CHECKED_IN'
-            ORDER BY checkin_time DESC
+            WHERE room_id = ?
+            ORDER BY 
+                CASE WHEN status = 'CHECKED_IN' THEN 0 ELSE 1 END,
+                checkin_time DESC
             LIMIT 1
         """, (room_id,))
         
         checkin_info = cursor.fetchone()
         
         if not checkin_info:
-            return jsonify({"status": "error", "message": "房间未入住"}), 404
+            return jsonify({"status": "error", "message": "该房间没有入住记录"}), 404
         
         guest_name, checkin_time, power_off_count = checkin_info
         power_off_count = power_off_count or 0
@@ -197,19 +322,21 @@ def get_accommodation_bill(room_id):
         room_rates = {1: 100, 2: 125, 3: 150, 4: 200, 5: 100}
         daily_rate = room_rates.get(room_id, 100)
         
-        # 获取入住信息
+        # 获取入住信息（优先获取当前入住的，如果没有则获取最近的一条记录）
         cursor.execute("""
             SELECT guest_name, checkin_time, checkout_time, power_off_count
             FROM checkin_records 
-            WHERE room_id = ? AND status = 'CHECKED_IN'
-            ORDER BY checkin_time DESC
+            WHERE room_id = ?
+            ORDER BY 
+                CASE WHEN status = 'CHECKED_IN' THEN 0 ELSE 1 END,
+                checkin_time DESC
             LIMIT 1
         """, (room_id,))
         
         checkin_info = cursor.fetchone()
         
         if not checkin_info:
-            return jsonify({"status": "error", "message": "房间未入住"}), 404
+            return jsonify({"status": "error", "message": "该房间没有入住记录"}), 404
         
         guest_name, checkin_time, checkout_time, power_off_count = checkin_info
         power_off_count = power_off_count or 0
@@ -315,12 +442,14 @@ def export_room_bill(room_id):
         room_rates = {1: 100, 2: 125, 3: 150, 4: 200, 5: 100}
         daily_rate = room_rates.get(room_id, 100)
         
-        # 获取入住信息
+        # 获取入住信息（优先获取当前入住的，如果没有则获取最近的一条记录）
         cursor.execute("""
             SELECT guest_name, checkin_time, checkout_time, power_off_count
             FROM checkin_records 
-            WHERE room_id = ? AND status = 'CHECKED_IN'
-            ORDER BY checkin_time DESC
+            WHERE room_id = ?
+            ORDER BY 
+                CASE WHEN status = 'CHECKED_IN' THEN 0 ELSE 1 END,
+                checkin_time DESC
             LIMIT 1
         """, (room_id,))
         
@@ -328,7 +457,7 @@ def export_room_bill(room_id):
         
         if not checkin_info:
             conn.close()
-            return jsonify({"status": "error", "message": "房间未入住"}), 404
+            return jsonify({"status": "error", "message": "该房间没有入住记录"}), 404
         
         guest_name, checkin_time, checkout_time, power_off_count = checkin_info
         power_off_count = power_off_count or 0

@@ -353,6 +353,21 @@ async function exportBill() {
     }
 }
 
+// 导出详单CSV
+async function exportDetailCSV(roomId) {
+    if (!roomId) {
+        alert("请先选择房间");
+        return;
+    }
+    
+    try {
+        // 直接下载CSV文件
+        window.location.href = `/api/bills/${roomId}/detail/export_csv`;
+    } catch (error) {
+        alert("导出CSV失败：" + error.message);
+    }
+}
+
 // 查看详单相关函数
 async function viewRoomDetail() {
     const select = document.getElementById("co-room-select");
@@ -462,6 +477,19 @@ function initFrontdeskView() {
     }
     if (exportBtn) {
         exportBtn.onclick = () => exportBill();
+    }
+    // 导出详单CSV按钮
+    const exportDetailCsvBtn = document.getElementById("co-export-detail-csv");
+    if (exportDetailCsvBtn) {
+        exportDetailCsvBtn.onclick = () => {
+            const select = document.getElementById("co-room-select");
+            const roomId = parseInt(select.value);
+            if (!roomId) {
+                alert("请先选择房间");
+                return;
+            }
+            exportDetailCSV(roomId);
+        };
     }
     // 账单类型改变时自动刷新账单
     if (billTypeSelect) {
@@ -1011,6 +1039,20 @@ async function init() {
     const viewDetailBtn = document.getElementById("admin-view-detail");
     if (viewDetailBtn) {
         viewDetailBtn.onclick = () => adminViewRoomDetail();
+    }
+    
+    // 导出详单CSV按钮
+    const exportDetailCsvBtn = document.getElementById("admin-export-detail-csv");
+    if (exportDetailCsvBtn) {
+        exportDetailCsvBtn.onclick = () => {
+            const select = document.getElementById("admin-room-select");
+            const roomId = parseInt(select.value);
+            if (!roomId) {
+                alert("请先选择房间");
+                return;
+            }
+            exportDetailCSV(roomId);
+        };
     }
     
     // 重置累计费用按钮
