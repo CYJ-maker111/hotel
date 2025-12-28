@@ -23,6 +23,7 @@ def get_room_bill_detail(room_id):
     """
     获取指定房间的空调使用详单
     字段：房间号、请求时间、服务开始时间、服务结束时间、服务时长（秒）、风速、当前费用、累积费用
+    使用room.cost作为总费用，确保与管理员界面一致
     """
     # 连接数据库
     db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'hotel_ac.db')
@@ -30,34 +31,84 @@ def get_room_bill_detail(room_id):
     cursor = conn.cursor()
     
     try:
+        # 使用room.cost作为总费用
+        room = system.scheduler.rooms.get(room_id)
+        if not room:
+            return jsonify({
+                "status": "error",
+                "message": f"房间{room_id}不存在"
+            }), 404
+        
+        total_cost = room.cost
+        
         # 查询房间的详单记录（包含新字段）
         cursor.execute("""
             SELECT room_id, request_time, start_time, end_time, service_duration, 
                    fan_speed, cost, accumulated_cost, mode, target_temp, operation_type
             FROM detail_records 
             WHERE room_id = ? 
-            ORDER BY start_time DESC
+            ORDER BY start_time ASC
         """, (room_id,))
         
         records = cursor.fetchall()
         
-        # 转换为JSON格式
+        # 转换为JSON格式，费用完全基于room.cost，不使用数据库中的费用数据
         result = []
-        for record in records:
-            result.append({
-                "room_id": record[0],           # 房间号
-                "request_time": record[1] or record[2],  # 请求时间（若无则使用开始时间）
-                "start_time": record[2],        # 服务开始时间
-                "end_time": record[3],          # 服务结束时间
-                "service_duration": record[4] or 0,  # 服务时长（秒）
-                "fan_speed": record[5],         # 风速
-                "cost": round(record[6], 2),    # 当前费用
-                "accumulated_cost": round(record[7], 2),  # 累积费用
-                # 额外字段
-                "mode": record[8],
-                "target_temp": record[9],
-                "operation_type": record[10]
-            })
+        if records:
+            # 完全基于room.cost计算费用，不使用数据库中的费用数据
+            # 将room.cost按服务时长比例分配给各条记录
+            
+            # 计算总服务时长（用于按比例分配费用）
+            total_duration = sum(int(record[4] or 0) for record in records)
+            
+            # 按时间顺序计算累积费用（从最早到最晚）
+            accumulated = 0.0
+            for i, record in enumerate(records):  # 已经按时间正序排列
+                # 如果是最后一条记录，确保累积费用等于room.cost
+                if i == len(records) - 1:
+                    # 最后一条记录的累积费用必须等于total_cost
+                    if i > 0:
+                        # 前面所有记录的累积费用
+                        prev_accumulated = accumulated
+                        # 最后一条记录的费用 = total_cost - 前面所有记录的累积费用
+                        adjusted_cost = round(total_cost - prev_accumulated, 2)
+                        accumulated = round(total_cost, 2)
+                    else:
+                        # 只有一条记录
+                        adjusted_cost = round(total_cost, 2)
+                        accumulated = round(total_cost, 2)
+                else:
+                    # 非最后一条记录，按服务时长比例分配费用
+                    record_duration = int(record[4] or 0)
+                    if total_duration > 0:
+                        # 按服务时长比例分配
+                        adjusted_cost = round(total_cost * (record_duration / total_duration), 2)
+                    else:
+                        # 如果总时长为0，按记录数量平均分配
+                        adjusted_cost = round(total_cost / len(records), 2)
+                    accumulated += adjusted_cost
+                    accumulated = round(accumulated, 2)
+                
+                result.append({
+                    "room_id": record[0],           # 房间号
+                    "request_time": record[1] or record[2] or '',  # 请求时间（若无则使用开始时间）
+                    "start_time": record[2] or '',        # 服务开始时间
+                    "end_time": record[3] or '',          # 服务结束时间
+                    "service_duration": int(record[4] or 0),  # 服务时长（秒）
+                    "fan_speed": record[5] or '',         # 风速
+                    "cost": round(adjusted_cost, 2),    # 当前费用（基于room.cost计算，不使用数据库费用）
+                    "accumulated_cost": round(accumulated, 2),  # 累积费用（基于room.cost）
+                    # 额外字段
+                    "mode": record[8] or '',
+                    "target_temp": float(record[9] or 0),
+                    "operation_type": record[10] or ''
+                })
+            
+            # 结果已经是按时间正序，但前端可能需要倒序显示，所以反转
+            result.reverse()
+        else:
+            # 如果没有记录，返回空列表
+            pass
         
         return jsonify({
             "room_id": room_id,
@@ -195,6 +246,7 @@ def export_detail_csv(room_id):
 def get_room_bill_summary(room_id):
     """
     获取指定房间的账单汇总信息
+    使用room.cost（内存中的费用）而不是数据库中的费用
     """
     # 连接数据库
     db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'hotel_ac.db')
@@ -202,16 +254,19 @@ def get_room_bill_summary(room_id):
     cursor = conn.cursor()
     
     try:
-        # 查询房间的总费用和总时长
+        # 使用room.cost（内存中的费用）
+        room = system.scheduler.rooms.get(room_id)
+        total_cost = room.cost if room else 0.0
+        
+        # 查询总时长（从数据库）
         cursor.execute("""
-            SELECT SUM(cost), SUM(julianday(end_time) - julianday(start_time)) * 86400
+            SELECT SUM(julianday(end_time) - julianday(start_time)) * 86400
             FROM detail_records 
             WHERE room_id = ?
         """, (room_id,))
         
         result = cursor.fetchone()
-        total_cost = result[0] or 0
-        total_duration = result[1] or 0  # 总时长（秒）
+        total_duration = result[0] or 0  # 总时长（秒）
         
         # 获取当前入住信息
         cursor.execute("""
@@ -279,15 +334,9 @@ def get_ac_bill(room_id):
         except:
             end_time_str = ""
         
-        # 获取空调总费用
-        cursor.execute("""
-            SELECT SUM(cost)
-            FROM detail_records 
-            WHERE room_id = ?
-        """, (room_id,))
-        
-        result = cursor.fetchone()
-        ac_total_cost = result[0] or 0
+        # 使用room.cost（内存中的费用）作为空调总费用
+        room = system.scheduler.rooms.get(room_id)
+        ac_total_cost = room.cost if room else 0.0
         
         return jsonify({
             "bill_type": "空调账单",
@@ -353,15 +402,9 @@ def get_accommodation_bill(room_id):
         # 计算住宿费用：按关机次数计算天数
         accommodation_cost = daily_rate * days
         
-        # 获取空调总费用
-        cursor.execute("""
-            SELECT SUM(cost)
-            FROM detail_records 
-            WHERE room_id = ?
-        """, (room_id,))
-        
-        result = cursor.fetchone()
-        ac_total_cost = result[0] or 0
+        # 使用room.cost（内存中的费用）作为空调总费用
+        room = system.scheduler.rooms.get(room_id)
+        ac_total_cost = room.cost if room else 0.0
         
         # 计算总费用
         total_cost = accommodation_cost + ac_total_cost
@@ -471,15 +514,9 @@ def export_room_bill(room_id):
         except:
             end_time_str = checkout_time or ""
         
-        # 获取空调总费用
-        cursor.execute("""
-            SELECT SUM(cost)
-            FROM detail_records 
-            WHERE room_id = ?
-        """, (room_id,))
-        
-        result = cursor.fetchone()
-        ac_total_cost = result[0] or 0
+        # 使用room.cost（内存中的费用）作为空调总费用
+        room = system.scheduler.rooms.get(room_id)
+        ac_total_cost = room.cost if room else 0.0
         
         # 构建账单数据
         if bill_type == 'ac':

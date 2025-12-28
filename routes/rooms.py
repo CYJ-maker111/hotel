@@ -13,24 +13,42 @@ def get_rooms():
 @rooms_bp.route('/<int:room_id>/power_on', methods=['POST'])
 def power_on(room_id: int):
     """房间开机"""
-    data = request.get_json(silent=True) or {}
-    # 检查房间是否存在，如果存在则使用房间当前的实际温度，而不是默认值
-    room = system.scheduler.rooms.get(room_id)
-    if room is not None:
-        # 如果房间已存在且有当前温度，则使用它
-        current_temp = room.current_temp
-    else:
-        # 如果房间不存在，则使用请求中的温度或默认值
-        current_temp = float(data.get('current_temp', 25.0))
-    mode_str = data.get('mode', 'COOL').upper()
-    
-    # 确保mode_str不为空，为空时使用默认值COOL
-    if not mode_str:
-        mode_str = 'COOL'
-    
-    mode = Mode[mode_str]
-    result = system.scheduler.power_on(room_id, current_temp, mode)
-    return jsonify(result)
+    try:
+        data = request.get_json(silent=True) or {}
+        # 检查房间是否存在，如果存在则使用房间当前的实际温度，而不是默认值
+        room = system.scheduler.rooms.get(room_id)
+        if room is not None:
+            # 如果房间已存在且有当前温度，则使用它
+            current_temp = room.current_temp
+        else:
+            # 如果房间不存在，则使用请求中的温度或默认值
+            current_temp = float(data.get('current_temp', 25.0))
+        
+        # 处理模式参数
+        mode_str = data.get('mode', 'COOL')
+        if isinstance(mode_str, str):
+            mode_str = mode_str.upper()
+        else:
+            mode_str = 'COOL'
+        
+        # 确保mode_str不为空，为空时使用默认值COOL
+        if not mode_str or mode_str not in ['COOL', 'HEAT']:
+            mode_str = 'COOL'
+        
+        # 转换为Mode枚举
+        try:
+            mode = Mode[mode_str]
+        except KeyError:
+            # 如果模式无效，使用默认的COOL模式
+            mode = Mode.COOL
+        
+        result = system.scheduler.power_on(room_id, current_temp, mode)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({
+            "error": f"开机失败：{str(e)}",
+            "message": f"房间{room_id}开机时发生错误"
+        }), 500
 
 @rooms_bp.route('/<int:room_id>/power_off', methods=['POST'])
 def power_off(room_id: int):

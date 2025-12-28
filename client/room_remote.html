@@ -223,7 +223,25 @@
 
     <script>
         // API 基础URL
-        const API_BASE_URL = 'http://127.0.0.1:5000/api';
+        // 自动从当前页面URL提取主机和端口，构建API地址
+        // 也可以通过URL参数手动指定，如：room_remote.html?api=http://192.168.1.100:5000/api
+        const urlParams = new URLSearchParams(window.location.search);
+        let API_BASE_URL = urlParams.get('api');
+        
+        // 如果没有通过URL参数指定，则自动从当前页面URL构建
+        if (!API_BASE_URL) {
+            const protocol = window.location.protocol; // http: 或 https:
+            const hostname = window.location.hostname; // 10.129.30.39 或 127.0.0.1
+            const port = window.location.port || (protocol === 'https:' ? '443' : '80'); // 5000 或空
+            // 构建API地址：http://10.129.30.39:5000/api
+            if (port && port !== '80' && port !== '443') {
+                API_BASE_URL = `${protocol}//${hostname}:${port}/api`;
+            } else {
+                API_BASE_URL = `${protocol}//${hostname}/api`;
+            }
+        }
+        
+        console.log('API_BASE_URL:', API_BASE_URL);
         
         // 当前选中的房间ID
         let currentRoomId = 1;
@@ -455,7 +473,7 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            mode: currentRoomStatus.mode || 'COOL'
+                            mode: (currentRoomStatus.mode || 'cool').toUpperCase()  // 确保是大写：COOL或HEAT
                             // 不传递current_temp参数，使用房间的实际温度
                         })
                     });

@@ -799,7 +799,7 @@ class Scheduler:
             "current_temp": round(room.current_temp, 2),
             "fan_speed": room.fan_speed.name,
             "state": room.state.value,
-            "cost": round(room.cost, 2),
+            "cost": round(room.cost, 2),  # 使用内存中的room.cost
             "served_seconds": self.service_timer.get_service_time(room_id),
             "waiting_seconds": self.wait_timer.get_wait_time(room_id),
         }
